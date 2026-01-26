@@ -1,233 +1,412 @@
 # Tech Stack Research: Witness MVP
 
-**Version:** 1.0
-**Date:** 2026-01-25
-**Status:** Research Complete
+**Version:** 2.0
+**Date:** 2026-01-26
+**Status:** Decision Made — Android-Only MVP
 
 ---
 
 ## Table of Contents
 
 1. [Executive Summary](#executive-summary)
-2. [Technical Requirements Analysis](#technical-requirements-analysis)
-3. [Option 1: Flutter + Go Federation](#option-1-flutter--go-federation)
-4. [Option 2: Kotlin Multiplatform + Swift UI](#option-2-kotlin-multiplatform--swift-ui)
-5. [Option 3: Native Dual-Platform](#option-3-native-dual-platform-kotlin--swift)
-6. [Comparison Matrix](#comparison-matrix)
-7. [Recommendation](#recommendation)
-8. [Appendix: Technology Notes](#appendix-technology-notes)
+2. [Decision: Android-Only MVP](#decision-android-only-mvp)
+3. [Technical Requirements](#technical-requirements)
+4. [Chosen Stack: Native Android + Go](#chosen-stack-native-android--go)
+5. [Architecture](#architecture)
+6. [Key Implementation Details](#key-implementation-details)
+7. [Distribution Strategy](#distribution-strategy)
+8. [Future iOS Path](#future-ios-path)
+9. [Appendix: Cross-Platform Options Considered](#appendix-cross-platform-options-considered)
 
 ---
 
 ## Executive Summary
 
-After analyzing the Witness MVP requirements against available technology options, this document evaluates **three viable tech stack approaches**. The primary constraints driving this analysis are:
+After analyzing requirements and practical constraints, **Witness MVP will be Android-only using native Kotlin + Jetpack Compose**, with a Go backend for federation.
 
-| Constraint | Impact on Stack Choice |
-|------------|------------------------|
-| Covert recording (screen-off) | Requires deep platform API access |
-| Real-time streaming | Requires efficient media pipelines |
-| App camouflage | Requires platform-specific UI tricks |
-| Federation protocol | Backend must be resilient, self-hostable |
-| Battery efficiency | Native code preferred for media |
-| < 3 second launch-to-record | Performance critical |
+### Decision Rationale
 
-### Quick Recommendation
+| Factor | Impact |
+|--------|--------|
+| **Available devices** | Development team has Android/Pixel devices only |
+| **Apple Developer credentials** | Not available; iOS development blocked |
+| **Witness mode (screen-off recording)** | Works fully on Android; iOS cannot do this |
+| **Camouflage** | Activity aliases work perfectly on Android; iOS has App Store restrictions |
+| **Distribution** | APK sideloading + F-Droid avoids app store approval risks |
+| **Target demographic** | Android dominates in immigrant communities (more affordable devices) |
 
-**Primary Recommendation: Flutter + Go Federation**
-- Best balance of development velocity, cross-platform coverage, and native capability
-- Flutter's platform channels enable necessary native features
-- Go backend is portable, efficient, and self-hostable
+### Chosen Stack
 
-**Alternative for Maximum Platform Integration: Kotlin Multiplatform + SwiftUI**
-- Better native API access but higher complexity
-- Recommended if Flutter proves insufficient for covert recording
+```
+┌─────────────────────────────────────────────────────┐
+│  ANDROID CLIENT        │  FEDERATION BACKEND        │
+├─────────────────────────────────────────────────────┤
+│  Kotlin + Jetpack      │  Go + PostgreSQL +         │
+│  Compose               │  MinIO + Redis             │
+└─────────────────────────────────────────────────────┘
+```
 
 ---
 
-## Technical Requirements Analysis
+## Decision: Android-Only MVP
 
-### Critical Mobile Features
+### Why Android-Only
 
-| Feature | Technical Requirement | Platform Challenge |
-|---------|----------------------|-------------------|
-| Screen-off recording | Background service + wake locks | Android: WorkManager + Foreground Service; iOS: Background modes + limited |
-| Camouflage | Dynamic icon/name, decoy UI | Android: Activity aliases; iOS: App Store restrictions |
-| Live streaming | HLS/RTMP/WebRTC streaming | Both: Native media codecs required |
-| Encryption | AES-256 at rest, TLS in transit | Both: Platform crypto APIs |
-| Bluetooth mesh | BLE scanning/advertising | Both: Bluetooth LE APIs |
-| Hash verification | SHA-256 at capture | Both: Native crypto |
-| GPS metadata | Location services | Both: Location APIs |
+| Advantage | Explanation |
+|-----------|-------------|
+| **Full witness mode** | Foreground Service + WakeLock enables true screen-off video recording |
+| **Complete camouflage** | Activity aliases allow full icon and app name changes |
+| **Simpler development** | Single platform, no cross-platform abstraction overhead |
+| **Faster MVP** | No iOS work means faster time to usable product |
+| **Sideload distribution** | APK installation without app store approval |
+| **F-Droid option** | Trusted FOSS distribution channel |
+| **Target users** | Android has higher market share among immigrant communities |
+| **No Apple fees** | Avoids $99/year Apple Developer Program |
 
-### Android-Specific Requirements
+### What We Gain vs Cross-Platform
 
-```
-CRITICAL ANDROID FEATURES:
-├── Foreground Service (required for background recording)
-├── Wake Lock (keep CPU alive with screen off)
-├── Camera2 API (full camera control)
-├── MediaCodec (hardware encoding)
-├── Activity Aliases (icon camouflage)
-├── WorkManager (persistent upload queue)
-└── Bluetooth LE (mesh networking)
-```
+| Capability | Cross-Platform Approach | Android-Native Approach |
+|------------|------------------------|------------------------|
+| Camera control | Plugin + bridge | Direct Camera2/CameraX API |
+| Background recording | Native module required anyway | Direct ForegroundService |
+| Video encoding | Native module required anyway | Direct MediaCodec |
+| Camouflage | Native module required anyway | Direct Activity aliases |
+| Bluetooth mesh | Plugin + native fallback | Direct Android BLE |
+| App size | 15-30 MB (Flutter) | 8-12 MB |
+| Startup time | Good | Best |
+| Debugging | Good | Best |
 
-### iOS-Specific Requirements
+### Trade-offs Accepted
 
-```
-CRITICAL iOS FEATURES:
-├── Background Modes (audio, location, processing)
-├── AVFoundation (camera/audio capture)
-├── VideoToolbox (hardware encoding)
-├── App Groups (data sharing)
-├── Background URLSession (upload queue)
-├── Core Bluetooth (mesh networking)
-└── CryptoKit (encryption)
-```
-
-### Federation Backend Requirements
-
-| Requirement | Technical Implication |
-|-------------|----------------------|
-| Self-hostable | Single binary or Docker, minimal dependencies |
-| Node-to-node replication | Event-based sync protocol |
-| End-to-end encryption | Client-side encryption, server never sees plaintext |
-| Horizontal scaling | Stateless API servers, shared storage |
-| Resilience | Database clustering, queue persistence |
+| Trade-off | Mitigation |
+|-----------|------------|
+| No iOS users | Android is ~70% of global market; revisit for v2 |
+| Smaller addressable market | Focus on highest-need users first |
+| Future iOS effort | Clean architecture allows later KMP extraction or native port |
 
 ---
 
-## Option 1: Flutter + Go Federation
+## Technical Requirements
 
-### Overview
+### Critical Android Features
 
-Flutter provides cross-platform UI with native performance, while Go powers a lightweight, efficient federation backend. Platform channels bridge to native code for camera, encryption, and background services.
-
-### Architecture
+All core Witness features map directly to Android platform capabilities:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           FLUTTER + GO STACK                             │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  MOBILE CLIENT                                                           │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │                         Flutter (Dart)                             │  │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐               │  │
-│  │  │     UI      │  │   State     │  │  Business   │               │  │
-│  │  │   Layer     │  │  Management │  │   Logic     │               │  │
-│  │  │  (Widgets)  │  │   (Riverpod)│  │             │               │  │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘               │  │
-│  │         │                │                │                        │  │
-│  │         └────────────────┼────────────────┘                        │  │
-│  │                          │                                          │  │
-│  │                  Platform Channels                                  │  │
-│  │                          │                                          │  │
-│  │  ┌───────────────────────┴───────────────────────┐                │  │
-│  │  │              Native Modules                    │                │  │
-│  │  │  ┌──────────────────┐  ┌──────────────────┐  │                │  │
-│  │  │  │  Android (Kotlin)│  │    iOS (Swift)   │  │                │  │
-│  │  │  │  • Camera2       │  │  • AVFoundation  │  │                │  │
-│  │  │  │  • MediaCodec    │  │  • VideoToolbox  │  │                │  │
-│  │  │  │  • ForegroundSvc │  │  • Background    │  │                │  │
-│  │  │  │  • Bluetooth LE  │  │  • CoreBluetooth │  │                │  │
-│  │  │  └──────────────────┘  └──────────────────┘  │                │  │
-│  │  └────────────────────────────────────────────────┘                │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│                                    │                                     │
-│                              HTTPS/WebSocket                             │
-│                                    │                                     │
-│  FEDERATION BACKEND                │                                     │
-│  ┌─────────────────────────────────┴─────────────────────────────────┐  │
-│  │                            Go Server                               │  │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐               │  │
-│  │  │   REST/gRPC │  │   Upload    │  │  Federation │               │  │
-│  │  │     API     │  │   Handler   │  │   Sync      │               │  │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘               │  │
-│  │         │                │                │                        │  │
-│  │  ┌──────┴────────────────┴────────────────┴──────┐               │  │
-│  │  │              Storage Layer                     │               │  │
-│  │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐    │               │  │
-│  │  │  │PostgreSQL│  │   S3/    │  │  Redis   │    │               │  │
-│  │  │  │(metadata)│  │  MinIO   │  │ (queue)  │    │               │  │
-│  │  │  └──────────┘  └──────────┘  └──────────┘    │               │  │
-│  │  └────────────────────────────────────────────────┘               │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
+WITNESS FEATURE                 ANDROID IMPLEMENTATION
+─────────────────────────────────────────────────────────
+Witness mode (screen-off)   →   ForegroundService + WakeLock + Camera2
+Camouflage (icon/name)      →   Activity aliases in AndroidManifest
+Decoy mode                  →   Separate launcher Activity
+Volume button trigger       →   MediaSession or AccessibilityService
+Video capture               →   Camera2 API + CameraX
+Hardware encoding           →   MediaCodec (H.264/H.265)
+Live streaming              →   RTMP/HLS via MediaMuxer
+Encrypted storage           →   EncryptedSharedPreferences + SQLCipher
+Upload queue                →   WorkManager (survives reboot)
+Bluetooth mesh              →   Android BLE APIs
+GPS metadata                →   FusedLocationProvider
+Hash at capture             →   MessageDigest (SHA-256)
 ```
 
-### Mobile Stack Details
+### Minimum Android Version
 
-| Layer | Technology | Rationale |
-|-------|------------|-----------|
-| UI Framework | Flutter 3.x | Hot reload, single codebase, native performance |
-| Language | Dart 3.x | Null safety, async/await, strong typing |
-| State Management | Riverpod 2.x | Compile-safe, testable, reactive |
-| Local Storage | Drift (SQLite) | Type-safe, reactive, encrypted via SQLCipher |
-| Networking | Dio + web_socket_channel | HTTP client with interceptors, WebSocket support |
-| Encryption | pointycastle + platform crypto | Cross-platform crypto, native for performance |
-| Camera | camera plugin + platform channels | Basic camera + native extensions |
-| Background | flutter_background_service + native | Cross-platform with native fallback |
+| Target | Version | API Level | Rationale |
+|--------|---------|-----------|-----------|
+| **Minimum** | Android 8.0 (Oreo) | API 26 | ForegroundService behavior, ~95% device coverage |
+| **Target** | Android 14 | API 34 | Latest features, Pixel optimization |
+| **Compile** | Android 14 | API 34 | Access to newest APIs |
 
-### Native Module Requirements (Flutter Platform Channels)
+### Permissions Required
 
-```dart
-// Platform channel interface example
-class WitnessPlatform {
-  static const channel = MethodChannel('witness/capture');
+```xml
+<!-- Camera and recording -->
+<uses-permission android:name="android.permission.CAMERA" />
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-  // Android: Uses Camera2 + MediaCodec + Foreground Service
-  // iOS: Uses AVFoundation + VideoToolbox + Background modes
-  Future<void> startWitnessMode() => channel.invokeMethod('startWitnessMode');
-  Future<void> stopWitnessMode() => channel.invokeMethod('stopWitnessMode');
-  Future<String> getVideoHash() => channel.invokeMethod('getVideoHash');
+<!-- Background operation -->
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+<uses-permission android:name="android.permission.WAKE_LOCK" />
+
+<!-- Location for metadata -->
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+<!-- Networking -->
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+<!-- Bluetooth mesh -->
+<uses-permission android:name="android.permission.BLUETOOTH" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+<!-- Boot persistence for upload queue -->
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+```
+
+---
+
+## Chosen Stack: Native Android + Go
+
+### Android Client Stack
+
+| Layer | Technology | Version | Rationale |
+|-------|------------|---------|-----------|
+| **Language** | Kotlin | 2.0+ | Modern, null-safe, coroutines |
+| **UI** | Jetpack Compose | 1.6+ | Declarative, modern, Google-recommended |
+| **Architecture** | MVVM + Clean Architecture | — | Testable, maintainable, scalable |
+| **DI** | Hilt | 2.50+ | Official Jetpack DI, compile-time safe |
+| **Async** | Coroutines + Flow | 1.8+ | Structured concurrency, reactive streams |
+| **Networking** | Retrofit + OkHttp | 2.9+ / 4.12+ | Industry standard, interceptors |
+| **Database** | Room | 2.6+ | Type-safe, reactive, migration support |
+| **Encrypted Storage** | EncryptedSharedPreferences + SQLCipher | — | Platform-backed encryption |
+| **Camera** | Camera2 + CameraX | 1.3+ | Full control + simplified API |
+| **Video Encoding** | MediaCodec | — | Hardware H.264/H.265 |
+| **Background** | WorkManager + ForegroundService | 2.9+ | Guaranteed execution, survives reboot |
+| **Bluetooth** | Android BLE APIs | — | Direct platform access |
+| **Crypto** | Tink + Android Keystore | 1.12+ | Google's crypto library |
+| **Image Loading** | Coil | 2.5+ | Kotlin-first, Compose integration |
+
+### Go Backend Stack
+
+| Component | Technology | Version | Rationale |
+|-----------|------------|---------|-----------|
+| **Language** | Go | 1.22+ | Single binary, efficient, cross-compile |
+| **HTTP Framework** | Gin | 1.9+ | Fast, lightweight, middleware support |
+| **Database** | PostgreSQL | 16+ | JSONB, reliability, ACID |
+| **DB Driver** | pgx | 5.5+ | Native Go driver, best performance |
+| **Object Storage** | MinIO (S3 API) | — | Self-hostable, standard API |
+| **Queue** | Redis Streams | 7+ | Lightweight, persistent, pub/sub |
+| **Auth** | JWT | — | Stateless, anonymous-compatible |
+| **Crypto** | golang.org/x/crypto | — | Standard library quality |
+| **Migrations** | golang-migrate | 4.17+ | Version-controlled schema |
+
+---
+
+## Architecture
+
+### High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         WITNESS ARCHITECTURE                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  ANDROID CLIENT                                                               │
+│  ┌─────────────────────────────────────────────────────────────────────────┐ │
+│  │                                                                          │ │
+│  │  ┌─────────────────────────────────────────────────────────────────┐   │ │
+│  │  │                    UI LAYER (Jetpack Compose)                    │   │ │
+│  │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │   │ │
+│  │  │  │  Main UI     │  │  Camouflage  │  │   Decoy UI   │          │   │ │
+│  │  │  │  (Record)    │  │  (Calculator)│  │   (Fake App) │          │   │ │
+│  │  │  └──────────────┘  └──────────────┘  └──────────────┘          │   │ │
+│  │  └─────────────────────────────────────────────────────────────────┘   │ │
+│  │                                    │                                    │ │
+│  │  ┌─────────────────────────────────┴─────────────────────────────────┐ │ │
+│  │  │                    DOMAIN LAYER (ViewModels)                       │ │ │
+│  │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │ │ │
+│  │  │  │  Recording   │  │   Upload     │  │   Settings   │            │ │ │
+│  │  │  │  ViewModel   │  │  ViewModel   │  │  ViewModel   │            │ │ │
+│  │  │  └──────────────┘  └──────────────┘  └──────────────┘            │ │ │
+│  │  └───────────────────────────────────────────────────────────────────┘ │ │
+│  │                                    │                                    │ │
+│  │  ┌─────────────────────────────────┴─────────────────────────────────┐ │ │
+│  │  │                    DATA LAYER (Repositories)                       │ │ │
+│  │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │ │ │
+│  │  │  │  Evidence    │  │   Upload     │  │    Node      │            │ │ │
+│  │  │  │  Repository  │  │  Repository  │  │  Repository  │            │ │ │
+│  │  │  └──────────────┘  └──────────────┘  └──────────────┘            │ │ │
+│  │  └───────────────────────────────────────────────────────────────────┘ │ │
+│  │                                    │                                    │ │
+│  │  ┌─────────────────────────────────┴─────────────────────────────────┐ │ │
+│  │  │                    PLATFORM SERVICES                               │ │ │
+│  │  │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐     │ │ │
+│  │  │  │  Capture   │ │   Upload   │ │  Crypto    │ │ Bluetooth  │     │ │ │
+│  │  │  │  Service   │ │  Worker    │ │  Manager   │ │   Mesh     │     │ │ │
+│  │  │  │ (Camera2 + │ │(WorkManager│ │  (Tink +   │ │  (BLE)     │     │ │ │
+│  │  │  │ MediaCodec)│ │ + Retrofit)│ │ Keystore)  │ │            │     │ │ │
+│  │  │  └────────────┘ └────────────┘ └────────────┘ └────────────┘     │ │ │
+│  │  └───────────────────────────────────────────────────────────────────┘ │ │
+│  │                                    │                                    │ │
+│  │  ┌─────────────────────────────────┴─────────────────────────────────┐ │ │
+│  │  │                    LOCAL STORAGE                                   │ │ │
+│  │  │  ┌──────────────────────┐  ┌──────────────────────┐              │ │ │
+│  │  │  │  Room Database       │  │  Encrypted Files     │              │ │ │
+│  │  │  │  (metadata, queue)   │  │  (video chunks)      │              │ │ │
+│  │  │  └──────────────────────┘  └──────────────────────┘              │ │ │
+│  │  └───────────────────────────────────────────────────────────────────┘ │ │
+│  │                                                                          │ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
+│                                      │                                        │
+│                                HTTPS / WebSocket                              │
+│                                      │                                        │
+│  FEDERATION BACKEND                  │                                        │
+│  ┌───────────────────────────────────┴───────────────────────────────────┐   │
+│  │                            Go Server                                   │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │   │
+│  │  │   REST API  │  │   Upload    │  │  Federation │  │  Streaming  │  │   │
+│  │  │  (Gin)      │  │   Handler   │  │    Sync     │  │   (WebRTC)  │  │   │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  │   │
+│  │         │                │                │                │          │   │
+│  │  ┌──────┴────────────────┴────────────────┴────────────────┴──────┐  │   │
+│  │  │                      Storage Layer                              │  │   │
+│  │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐                      │  │   │
+│  │  │  │PostgreSQL│  │  MinIO   │  │  Redis   │                      │  │   │
+│  │  │  │(metadata)│  │ (videos) │  │ (queue)  │                      │  │   │
+│  │  │  └──────────┘  └──────────┘  └──────────┘                      │  │   │
+│  │  └─────────────────────────────────────────────────────────────────┘  │   │
+│  └───────────────────────────────────────────────────────────────────────┘   │
+│                                      │                                        │
+│                              Federation Sync                                  │
+│                                      │                                        │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐           │
+│  │   Node A (ACLU)  │◄─┤   Node B (Org)   │◄─┤  Node C (Self)   │           │
+│  └──────────────────┘  └──────────────────┘  └──────────────────┘           │
+│                                                                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow
+
+```
+CAPTURE FLOW:
+┌────────┐    ┌────────┐    ┌────────┐    ┌────────┐    ┌────────┐
+│ Camera │───▶│Encoder │───▶│ Hash   │───▶│Encrypt │───▶│ Queue  │
+│(Camera2)    │(MediaCodec)  │(SHA-256)    │(Tink)      │(Room)  │
+└────────┘    └────────┘    └────────┘    └────────┘    └────────┘
+                                                              │
+UPLOAD FLOW:                                                  │
+┌────────┐    ┌────────┐    ┌────────┐    ┌────────┐         │
+│ Worker │◀───│ Chunk  │◀───│  TLS   │◀───│  Node  │◀────────┘
+│(WorkMgr)    │ Upload │    │ 1.3    │    │  API   │
+└────────┘    └────────┘    └────────┘    └────────┘
+                                               │
+FEDERATION FLOW:                               │
+┌────────┐    ┌────────┐    ┌────────┐        │
+│ Node A │◀──▶│ Node B │◀──▶│ Node C │◀───────┘
+│        │    │        │    │        │
+└────────┘    └────────┘    └────────┘
+```
+
+---
+
+## Key Implementation Details
+
+### Witness Mode (Covert Recording)
+
+The core differentiating feature — recording with screen off:
+
+```kotlin
+class WitnessModeService : Service() {
+
+    private lateinit var cameraManager: CameraManager
+    private lateinit var captureSession: CameraCaptureSession
+    private lateinit var mediaRecorder: MediaRecorder
+    private lateinit var wakeLock: PowerManager.WakeLock
+
+    override fun onCreate() {
+        super.onCreate()
+        acquireWakeLock()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Start as foreground service (required for Android 8+)
+        startForeground(NOTIFICATION_ID, createSilentNotification())
+
+        // Initialize camera and start recording
+        initializeCamera()
+        startRecording()
+
+        return START_STICKY // Restart if killed
+    }
+
+    private fun acquireWakeLock() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "Witness::WitnessMode"
+        )
+        wakeLock.acquire(TimeUnit.HOURS.toMillis(4)) // Max recording time
+    }
+
+    private fun createSilentNotification(): Notification {
+        // Create minimal notification (required for foreground service)
+        // Can be disguised as system notification
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("") // Empty or camouflaged
+            .setSmallIcon(R.drawable.ic_transparent)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .build()
+    }
+
+    private fun startRecording() {
+        // Camera2 API setup for background recording
+        // MediaCodec for hardware H.264 encoding
+        // Output to encrypted file chunks
+    }
 }
 ```
 
-### Backend Stack Details
-
-| Component | Technology | Rationale |
-|-----------|------------|-----------|
-| Language | Go 1.22+ | Single binary, efficient concurrency, cross-compile |
-| Framework | Gin or Echo | Lightweight, fast HTTP router |
-| Database | PostgreSQL 16 | JSONB for flexibility, proven reliability |
-| Object Storage | S3 API (MinIO self-hosted) | Standard API, self-hostable |
-| Queue | Redis Streams or NATS | Lightweight, persistent queues |
-| Federation Protocol | Custom (ActivityPub-inspired) | Event-based replication |
-
-### Strengths
-
-| Strength | Explanation |
-|----------|-------------|
-| **Development velocity** | Single UI codebase, hot reload, strong tooling |
-| **Cross-platform consistency** | UI identical on both platforms |
-| **Native escape hatch** | Platform channels for anything Flutter can't do |
-| **Mature ecosystem** | Large plugin ecosystem, active community |
-| **Go efficiency** | Single binary deployment, low resource usage |
-| **Self-hostable** | Go binary + PostgreSQL + MinIO = complete node |
-
-### Weaknesses
-
-| Weakness | Mitigation |
-|----------|------------|
-| **Native code still required** | Budget time for Kotlin/Swift modules (~30% effort) |
-| **Flutter camera limitations** | Use platform channels for full Camera2/AVFoundation |
-| **Background execution complexity** | Native foreground service required for Android |
-| **Learning curve** | Dart less common, but learnable |
-| **iOS background limits** | Fundamental iOS limitation, not Flutter-specific |
-
 ### Camouflage Implementation
 
-**Android:**
+Activity aliases enable complete icon/name change:
+
 ```xml
-<!-- AndroidManifest.xml - Activity aliases for icon camouflage -->
+<!-- AndroidManifest.xml -->
+
+<!-- Real app entry (disabled by default) -->
+<activity
+    android:name=".ui.main.MainActivity"
+    android:exported="true"
+    android:enabled="false">
+    <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+    </intent-filter>
+</activity>
+
+<!-- Calculator disguise (enabled by default) -->
 <activity-alias
-    android:name=".CalculatorAlias"
+    android:name=".CalculatorLauncher"
     android:icon="@mipmap/ic_calculator"
     android:label="Calculator"
-    android:targetActivity=".MainActivity"
-    android:enabled="false">
+    android:targetActivity=".ui.camouflage.CamouflageActivity"
+    android:enabled="true"
+    android:exported="true">
+    <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+    </intent-filter>
+</activity-alias>
+
+<!-- Weather disguise (disabled by default) -->
+<activity-alias
+    android:name=".WeatherLauncher"
+    android:icon="@mipmap/ic_weather"
+    android:label="Weather"
+    android:targetActivity=".ui.camouflage.CamouflageActivity"
+    android:enabled="false"
+    android:exported="true">
+    <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+    </intent-filter>
+</activity-alias>
+
+<!-- Notes disguise -->
+<activity-alias
+    android:name=".NotesLauncher"
+    android:icon="@mipmap/ic_notes"
+    android:label="Notes"
+    android:targetActivity=".ui.camouflage.CamouflageActivity"
+    android:enabled="false"
+    android:exported="true">
     <intent-filter>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
@@ -235,478 +414,444 @@ class WitnessPlatform {
 </activity-alias>
 ```
 
-**iOS:**
-- Alternate icons via `UIApplication.setAlternateIconName`
-- App name change not possible without App Store update
-- Workaround: Submit to App Store as innocuous app (e.g., "Safety Notes")
+Switching camouflage at runtime:
 
-### Covert Recording (Witness Mode)
-
-**Android Implementation:**
 ```kotlin
-// Native Kotlin module
-class WitnessModeService : Service() {
-    private lateinit var cameraManager: CameraManager
-    private lateinit var mediaRecorder: MediaRecorder
+object CamouflageManager {
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, createSilentNotification())
-        acquireWakeLock()
-        startRecording()
-        return START_STICKY
+    enum class Disguise(val aliasName: String) {
+        CALCULATOR(".CalculatorLauncher"),
+        WEATHER(".WeatherLauncher"),
+        NOTES(".NotesLauncher"),
+        NONE(".ui.main.MainActivity")
     }
 
-    private fun startRecording() {
-        // Camera2 API + MediaCodec for efficient encoding
-        // Screen can be off - foreground service keeps process alive
+    fun switchDisguise(context: Context, newDisguise: Disguise) {
+        val packageManager = context.packageManager
+        val packageName = context.packageName
+
+        // Disable all aliases
+        Disguise.entries.forEach { disguise ->
+            packageManager.setComponentEnabledSetting(
+                ComponentName(packageName, "$packageName${disguise.aliasName}"),
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP
+            )
+        }
+
+        // Enable selected alias
+        packageManager.setComponentEnabledSetting(
+            ComponentName(packageName, "$packageName${newDisguise.aliasName}"),
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+            PackageManager.DONT_KILL_APP
+        )
     }
 }
 ```
 
-**iOS Limitations:**
-- iOS does not allow true screen-off recording without user interaction
-- Best available: Audio recording in background + location tracking
-- Video requires app in foreground (but can minimize UI visibility)
-- Alternative: Use audio-only witness mode on iOS
+### Volume Button Trigger
 
-### Estimated Development Effort
-
-| Component | Effort | Notes |
-|-----------|--------|-------|
-| Flutter UI + business logic | 40% | Shared across platforms |
-| Android native modules | 25% | Camera, foreground service, camouflage |
-| iOS native modules | 20% | AVFoundation, background modes |
-| Go backend | 15% | API, federation, storage |
-| **Total** | 100% | |
-
----
-
-## Option 2: Kotlin Multiplatform + Swift UI
-
-### Overview
-
-Kotlin Multiplatform (KMP) shares business logic (encryption, networking, storage) across platforms while using native UI (Jetpack Compose on Android, SwiftUI on iOS). This provides maximum platform integration with significant code sharing.
-
-### Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     KOTLIN MULTIPLATFORM STACK                           │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  SHARED CODE (Kotlin Multiplatform)                                      │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │                      Common Module (Kotlin)                        │  │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐               │  │
-│  │  │  Business   │  │  Network    │  │  Storage    │               │  │
-│  │  │   Logic     │  │   Layer     │  │   Layer     │               │  │
-│  │  │             │  │   (Ktor)    │  │(SQLDelight) │               │  │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘               │  │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐               │  │
-│  │  │  Crypto     │  │  Upload     │  │  Federation │               │  │
-│  │  │  Utils      │  │  Manager    │  │  Protocol   │               │  │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘               │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│         │                                           │                    │
-│         │ expect/actual                             │                    │
-│         │                                           │                    │
-│  ┌──────┴──────────────────┐      ┌────────────────┴─────────────────┐ │
-│  │     ANDROID APP         │      │          iOS APP                  │ │
-│  │  ┌───────────────────┐  │      │  ┌───────────────────┐           │ │
-│  │  │  Jetpack Compose  │  │      │  │      SwiftUI      │           │ │
-│  │  │       UI          │  │      │  │        UI         │           │ │
-│  │  └───────────────────┘  │      │  └───────────────────┘           │ │
-│  │  ┌───────────────────┐  │      │  ┌───────────────────┐           │ │
-│  │  │  Platform-specific│  │      │  │  Platform-specific│           │ │
-│  │  │  • Camera2        │  │      │  │  • AVFoundation   │           │ │
-│  │  │  • ForegroundSvc  │  │      │  │  • Background     │           │ │
-│  │  │  • Bluetooth      │  │      │  │  • CoreBluetooth  │           │ │
-│  │  └───────────────────┘  │      │  └───────────────────┘           │ │
-│  └─────────────────────────┘      └──────────────────────────────────┘ │
-│                                                                          │
-│  BACKEND: Same Go stack as Option 1                                     │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### Shared Code (KMP Common Module)
-
-| Layer | Technology | Rationale |
-|-------|------------|-----------|
-| Networking | Ktor Client | KMP-native, suspending functions |
-| Database | SQLDelight | Type-safe SQL, KMP support |
-| Serialization | kotlinx.serialization | KMP-native, JSON/Protobuf |
-| Crypto | Libsodium (via expect/actual) | Platform bindings |
-| Async | Coroutines | KMP-native concurrency |
-| DI | Koin | Lightweight, KMP-compatible |
-
-### Platform-Specific Code
-
-**Android (Kotlin):**
-| Component | Technology |
-|-----------|------------|
-| UI | Jetpack Compose |
-| Camera | Camera2 / CameraX |
-| Background | Foreground Service + WorkManager |
-| Bluetooth | Android BLE APIs |
-| Encryption | Android Keystore |
-
-**iOS (Swift):**
-| Component | Technology |
-|-----------|------------|
-| UI | SwiftUI |
-| Camera | AVFoundation |
-| Background | Background Modes + BGTaskScheduler |
-| Bluetooth | Core Bluetooth |
-| Encryption | CryptoKit + Keychain |
-
-### Strengths
-
-| Strength | Explanation |
-|----------|-------------|
-| **Full native UI** | Platform-perfect look and feel |
-| **Deep platform access** | No abstraction layer for camera/services |
-| **Significant code sharing** | 40-60% shared business logic |
-| **Type safety across boundary** | Kotlin/Swift interop is clean |
-| **Future-proof** | Google and JetBrains actively investing |
-| **Native performance** | No bridge overhead |
-
-### Weaknesses
-
-| Weakness | Mitigation |
-|----------|------------|
-| **Two UI codebases** | Design system documentation, component parity |
-| **KMP maturity** | Improving rapidly, 1.9+ is stable |
-| **iOS interop complexity** | Kotlin/Native memory model improvements help |
-| **Smaller ecosystem** | Growing, but fewer ready-made solutions |
-| **Higher initial effort** | Two UIs to build, but faster iteration later |
-
-### Camouflage Implementation
-
-Same as Flutter option - this is fundamentally a platform API issue, not a framework choice.
-
-### Covert Recording
-
-Native implementation identical to Flutter option, but no platform channel bridge needed.
-
-### Estimated Development Effort
-
-| Component | Effort | Notes |
-|-----------|--------|-------|
-| Shared KMP module | 30% | Business logic, networking, storage |
-| Android UI (Compose) | 25% | Full native UI |
-| Android platform code | 15% | Camera, services |
-| iOS UI (SwiftUI) | 20% | Full native UI |
-| iOS platform code | 10% | AVFoundation, background |
-| **Total** | 100% | |
-
----
-
-## Option 3: Native Dual-Platform (Kotlin + Swift)
-
-### Overview
-
-Fully native development with no cross-platform framework. Maximum platform integration and performance, but requires maintaining two completely separate codebases.
-
-### Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        NATIVE DUAL-PLATFORM                              │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ┌──────────────────────────────┐    ┌──────────────────────────────┐  │
-│  │        ANDROID APP           │    │          iOS APP              │  │
-│  │         (Kotlin)             │    │          (Swift)              │  │
-│  │                              │    │                               │  │
-│  │  ┌────────────────────────┐  │    │  ┌────────────────────────┐  │  │
-│  │  │    Jetpack Compose     │  │    │  │       SwiftUI          │  │  │
-│  │  └────────────────────────┘  │    │  └────────────────────────┘  │  │
-│  │  ┌────────────────────────┐  │    │  ┌────────────────────────┐  │  │
-│  │  │    Business Logic      │  │    │  │    Business Logic      │  │  │
-│  │  │    (ViewModels)        │  │    │  │   (ViewModels/TCA)     │  │  │
-│  │  └────────────────────────┘  │    │  └────────────────────────┘  │  │
-│  │  ┌────────────────────────┐  │    │  ┌────────────────────────┐  │  │
-│  │  │      Data Layer        │  │    │  │      Data Layer        │  │  │
-│  │  │  Room + Retrofit +     │  │    │  │  CoreData + URLSession │  │  │
-│  │  │      DataStore         │  │    │  │    + UserDefaults      │  │  │
-│  │  └────────────────────────┘  │    │  └────────────────────────┘  │  │
-│  │  ┌────────────────────────┐  │    │  ┌────────────────────────┐  │  │
-│  │  │   Platform Services    │  │    │  │   Platform Services    │  │  │
-│  │  │  Camera2, MediaCodec,  │  │    │  │  AVFoundation, Video-  │  │  │
-│  │  │  ForegroundService,    │  │    │  │  Toolbox, Background   │  │  │
-│  │  │  WorkManager, BLE      │  │    │  │  Modes, CoreBluetooth  │  │  │
-│  │  └────────────────────────┘  │    │  └────────────────────────┘  │  │
-│  │                              │    │                               │  │
-│  └──────────────────────────────┘    └──────────────────────────────┘  │
-│                                                                          │
-│  SHARED: API specification, federation protocol, design system           │
-│                                                                          │
-│  BACKEND: Same Go stack as Option 1                                     │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### Android Stack
-
-| Layer | Technology | Rationale |
-|-------|------------|-----------|
-| UI | Jetpack Compose | Modern, declarative, Google-recommended |
-| Architecture | MVVM + Clean Architecture | Testable, maintainable |
-| DI | Hilt | Official Jetpack DI |
-| Networking | Retrofit + OkHttp | Industry standard |
-| Database | Room | Type-safe, reactive |
-| Background | WorkManager + Foreground Service | Guaranteed execution |
-| Camera | Camera2 / CameraX | Full control |
-
-### iOS Stack
-
-| Layer | Technology | Rationale |
-|-------|------------|-----------|
-| UI | SwiftUI | Modern, declarative, Apple-recommended |
-| Architecture | TCA or MVVM | Testable, maintainable |
-| DI | Manual or Swinject | Swift DI options |
-| Networking | URLSession + async/await | Native, efficient |
-| Database | CoreData or SwiftData | Native persistence |
-| Background | BGTaskScheduler + Background modes | Platform-standard |
-| Camera | AVFoundation | Full control |
-
-### Strengths
-
-| Strength | Explanation |
-|----------|-------------|
-| **Maximum platform integration** | No abstraction between code and platform |
-| **Best possible performance** | No bridge, no overhead |
-| **Platform-native patterns** | Follow official guidelines exactly |
-| **Independent releases** | Can ship platform-specific fixes independently |
-| **Hire specialists** | Android devs + iOS devs, not generalists |
-
-### Weaknesses
-
-| Weakness | Mitigation |
-|----------|------------|
-| **Double the code** | Strong API contracts, shared design system |
-| **Feature drift** | Rigorous feature parity testing |
-| **Double the bugs** | More testing, but different bugs |
-| **Higher cost** | Need two specialized teams |
-| **Coordination overhead** | Shared specs, regular sync |
-
-### When to Choose Native
-
-This approach is best when:
-- Budget is not a constraint
-- Team has deep platform expertise
-- Maximum performance is critical
-- Platforms have significantly different UX requirements
-- Long-term maintenance team is established
-
-### Estimated Development Effort
-
-| Component | Effort | Notes |
-|-----------|--------|-------|
-| Android app (full) | 45% | Complete app |
-| iOS app (full) | 45% | Complete app |
-| Backend | 10% | Shared API |
-| **Total** | 100% | |
-
-**Note:** Total effort is ~1.5-2x higher than cross-platform options.
-
----
-
-## Comparison Matrix
-
-### Development Factors
-
-| Factor | Flutter + Go | KMP + SwiftUI | Native Dual |
-|--------|--------------|---------------|-------------|
-| **Code sharing** | 70-80% | 40-60% | 0-10% |
-| **Time to MVP** | Fastest | Medium | Slowest |
-| **Team size (MVP)** | 2-3 devs | 3-4 devs | 4-6 devs |
-| **Hiring difficulty** | Medium (Dart) | Medium (KMP) | Easy (specialists) |
-| **Learning curve** | Medium | Medium-High | Low (if experienced) |
-
-### Technical Factors
-
-| Factor | Flutter + Go | KMP + SwiftUI | Native Dual |
-|--------|--------------|---------------|-------------|
-| **Native API access** | Via channels | Direct (some limits) | Direct |
-| **Camera/video perf** | Good (native modules) | Excellent | Excellent |
-| **Background execution** | Good (native required) | Excellent | Excellent |
-| **UI flexibility** | Limited to Flutter widgets | Full native | Full native |
-| **App size** | ~15-30 MB | ~10-20 MB | ~8-15 MB |
-| **Startup time** | Good | Excellent | Excellent |
-
-### Maintenance Factors
-
-| Factor | Flutter + Go | KMP + SwiftUI | Native Dual |
-|--------|--------------|---------------|-------------|
-| **Single codebase** | Mostly yes | Partially | No |
-| **Platform updates** | Wait for plugins | Near-immediate | Immediate |
-| **Debugging ease** | Good | Medium | Best |
-| **Testing** | Single test suite | Partial sharing | Two suites |
-
-### Risk Factors
-
-| Factor | Flutter + Go | KMP + SwiftUI | Native Dual |
-|--------|--------------|---------------|-------------|
-| **Framework maturity** | High | Medium-High | Highest |
-| **Community size** | Large | Growing | Largest |
-| **Corporate backing** | Google | Google + JetBrains | Apple + Google |
-| **Longevity risk** | Low | Low | Lowest |
-
----
-
-## Recommendation
-
-### Primary Recommendation: Flutter + Go
-
-**For the Witness MVP, Flutter + Go provides the best balance of development velocity, cross-platform coverage, and the ability to implement all critical features.**
-
-#### Rationale
-
-1. **MVP Speed**: Single UI codebase means faster iteration and testing
-2. **Native Escape Hatch**: Platform channels enable all required native features
-3. **Open Source Alignment**: Flutter is fully open source, aligns with Witness philosophy
-4. **Go Backend Efficiency**: Single binary deployment, easy for organizations to self-host
-5. **Proven for Media Apps**: Apps like eBay Motors, Google Pay use Flutter for camera features
-
-#### Key Implementation Notes
-
-| Feature | Implementation Approach |
-|---------|------------------------|
-| Witness mode (Android) | Native Kotlin foreground service via platform channel |
-| Witness mode (iOS) | Audio background + limited video (iOS constraint) |
-| Camouflage | Activity aliases (Android), alternate icons (iOS) |
-| Streaming | Native HLS/RTMP via platform channel |
-| Encryption | Platform crypto APIs via channel |
-| Bluetooth mesh | flutter_blue_plus + native fallback |
-
-#### When to Escalate to KMP
-
-If during development these limitations prove blocking:
-- Flutter camera plugins insufficient for quality requirements
-- Background execution unreliable
-- Platform channel overhead impacts performance
-
-Then consider KMP for v2 or specific modules.
-
-### Alternative Recommendation: KMP + SwiftUI
-
-**Choose this if:**
-- Team has strong Kotlin/Swift expertise
-- Higher native platform integration is required
-- Longer development timeline is acceptable
-- UI must perfectly match platform conventions
-
-### Not Recommended for MVP: Native Dual
-
-While this provides the best platform integration, the development overhead is significant for an open-source MVP. Consider for v2 if Witness achieves significant adoption and funding.
-
----
-
-## Appendix: Technology Notes
-
-### Flutter Relevant Libraries
-
-```yaml
-# pubspec.yaml - key dependencies
-dependencies:
-  # State
-  flutter_riverpod: ^2.4.0
-
-  # Storage
-  drift: ^2.14.0
-  drift_sqflite: ^2.0.0
-
-  # Networking
-  dio: ^5.4.0
-  web_socket_channel: ^2.4.0
-
-  # Crypto
-  pointycastle: ^3.7.0
-  cryptography: ^2.5.0
-
-  # Camera (basic)
-  camera: ^0.10.5
-
-  # Background
-  flutter_background_service: ^5.0.0
-
-  # Bluetooth
-  flutter_blue_plus: ^1.28.0
-
-  # Local storage
-  shared_preferences: ^2.2.0
-  flutter_secure_storage: ^9.0.0
-```
-
-### Go Backend Libraries
-
-```go
-// go.mod - key dependencies
-module witness-node
-
-require (
-    github.com/gin-gonic/gin v1.9.1
-    github.com/jackc/pgx/v5 v5.5.0
-    github.com/minio/minio-go/v7 v7.0.66
-    github.com/redis/go-redis/v9 v9.3.0
-    github.com/golang-jwt/jwt/v5 v5.2.0
-    golang.org/x/crypto v0.17.0
-)
-```
-
-### KMP Relevant Libraries
+Activate witness mode via volume button sequence:
 
 ```kotlin
-// build.gradle.kts - KMP common module
-kotlin {
-    sourceSets {
-        commonMain.dependencies {
-            implementation("io.ktor:ktor-client-core:2.3.7")
-            implementation("app.cash.sqldelight:runtime:2.0.1")
-            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-            implementation("io.insert-koin:koin-core:3.5.3")
+class VolumeButtonReceiver : BroadcastReceiver() {
+
+    private val pattern = listOf(
+        KeyEvent.KEYCODE_VOLUME_UP,
+        KeyEvent.KEYCODE_VOLUME_UP,
+        KeyEvent.KEYCODE_VOLUME_DOWN,
+        KeyEvent.KEYCODE_VOLUME_DOWN
+    )
+    private val pressSequence = mutableListOf<Int>()
+    private var lastPressTime = 0L
+
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_MEDIA_BUTTON) return
+
+        val event = intent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
+        if (event?.action != KeyEvent.ACTION_DOWN) return
+
+        val currentTime = System.currentTimeMillis()
+
+        // Reset if too slow (> 500ms between presses)
+        if (currentTime - lastPressTime > 500) {
+            pressSequence.clear()
+        }
+
+        pressSequence.add(event.keyCode)
+        lastPressTime = currentTime
+
+        // Check if pattern matches
+        if (pressSequence.takeLast(pattern.size) == pattern) {
+            pressSequence.clear()
+            triggerWitnessMode(context)
+        }
+    }
+
+    private fun triggerWitnessMode(context: Context) {
+        // Haptic feedback (subtle confirmation)
+        val vibrator = context.getSystemService(Vibrator::class.java)
+        vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+
+        // Start witness mode service
+        val intent = Intent(context, WitnessModeService::class.java)
+        ContextCompat.startForegroundService(context, intent)
+    }
+}
+```
+
+### Persistent Upload Queue
+
+WorkManager ensures uploads survive app/device restarts:
+
+```kotlin
+class UploadWorker(
+    context: Context,
+    params: WorkerParameters
+) : CoroutineWorker(context, params) {
+
+    @Inject lateinit var uploadRepository: UploadRepository
+    @Inject lateinit var nodeApi: NodeApi
+
+    override suspend fun doWork(): Result {
+        val evidenceId = inputData.getString("evidence_id") ?: return Result.failure()
+
+        return try {
+            val evidence = uploadRepository.getEvidence(evidenceId)
+
+            // Upload in chunks
+            evidence.chunks.forEach { chunk ->
+                if (!chunk.uploaded) {
+                    nodeApi.uploadChunk(chunk)
+                    uploadRepository.markChunkUploaded(chunk.id)
+                }
+            }
+
+            // Verify with hash
+            nodeApi.verifyHash(evidence.hash)
+
+            // Delete local copy after confirmation
+            uploadRepository.deleteLocalEvidence(evidenceId)
+
+            Result.success()
+        } catch (e: Exception) {
+            if (runAttemptCount < 10) {
+                Result.retry()
+            } else {
+                Result.failure()
+            }
+        }
+    }
+
+    companion object {
+        fun enqueue(context: Context, evidenceId: String) {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+
+            val request = OneTimeWorkRequestBuilder<UploadWorker>()
+                .setConstraints(constraints)
+                .setInputData(workDataOf("evidence_id" to evidenceId))
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                .build()
+
+            WorkManager.getInstance(context)
+                .enqueueUniqueWork(
+                    "upload_$evidenceId",
+                    ExistingWorkPolicy.KEEP,
+                    request
+                )
         }
     }
 }
 ```
 
-### Federation Protocol Sketch
+### Evidence Hashing
+
+SHA-256 hash at moment of capture:
+
+```kotlin
+class EvidenceHasher {
+
+    fun hashVideoChunk(chunk: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hashBytes = digest.digest(chunk)
+        return hashBytes.joinToString("") { "%02x".format(it) }
+    }
+
+    fun hashVideoFile(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(8192)
+            var bytesRead: Int
+            while (input.read(buffer).also { bytesRead = it } != -1) {
+                digest.update(buffer, 0, bytesRead)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    fun createMetadataBundle(
+        videoHash: String,
+        location: Location?,
+        timestamp: Long,
+        deviceInfo: DeviceInfo
+    ): EvidenceMetadata {
+        return EvidenceMetadata(
+            videoHash = videoHash,
+            captureTimestamp = timestamp,
+            latitude = location?.latitude,
+            longitude = location?.longitude,
+            locationAccuracy = location?.accuracy,
+            deviceManufacturer = deviceInfo.manufacturer,
+            deviceModel = deviceInfo.model,
+            androidVersion = deviceInfo.androidVersion,
+            appVersion = deviceInfo.appVersion
+        )
+    }
+}
+```
+
+---
+
+## Distribution Strategy
+
+### Primary Channels
+
+| Channel | Priority | Pros | Cons |
+|---------|----------|------|------|
+| **GitHub Releases** | P1 | Immediate updates, developer-friendly, versioned | Manual install |
+| **F-Droid** | P1 | Trusted FOSS channel, auto-updates, discoverable | Slower review |
+| **Direct APK** | P2 | Full control, no gatekeepers | No auto-update |
+| **Obtainium** | P3 | Auto-updates from GitHub | Requires app install |
+
+### F-Droid Preparation
+
+Requirements for F-Droid inclusion:
+- Fully open source (GPL/Apache/MIT)
+- No proprietary dependencies
+- Reproducible builds
+- No tracking/analytics
+
+```yaml
+# F-Droid metadata (fdroid/metadata/org.witness.app.yml)
+Categories:
+  - Security
+  - Multimedia
+License: GPL-3.0-only
+AuthorName: Witness Project
+SourceCode: https://github.com/witness-project/witness-android
+IssueTracker: https://github.com/witness-project/witness-android/issues
+
+AutoName: Witness
+
+Description: |
+  Secure video evidence app for citizen journalists.
+
+  Features:
+  * Covert recording with screen off
+  * App camouflage (disguise as calculator)
+  * Encrypted storage
+  * Federated backup to trusted organizations
+  * Anonymous accounts
+
+RepoType: git
+Repo: https://github.com/witness-project/witness-android.git
+
+Builds:
+  - versionName: 1.0.0
+    versionCode: 1
+    commit: v1.0.0
+    subdir: app
+    gradle:
+      - yes
+```
+
+### Avoiding Play Store (Initially)
+
+Reasons to avoid Google Play for MVP:
+1. **Content policy risk** — App may be flagged for "facilitating illegal activity"
+2. **Approval delays** — Review process unpredictable
+3. **Update control** — Google can pull app at any time
+4. **Identity requirements** — Developer account requires identity
+
+Future consideration: Apply to Play Store once app is established and has legal backing.
+
+---
+
+## Future iOS Path
+
+If iOS becomes necessary, options:
+
+### Option 1: Kotlin Multiplatform (Recommended)
+
+Extract business logic to shared KMP module:
 
 ```
-WITNESS FEDERATION PROTOCOL (DRAFT)
-
-Message Types:
-├── EVIDENCE_CREATED    - New evidence hash announced
-├── EVIDENCE_REPLICATE  - Request/push evidence data
-├── HASH_VERIFY         - Verify evidence hash exists
-├── NODE_ANNOUNCE       - Node joining federation
-└── NODE_HEARTBEAT      - Node availability ping
-
-Replication Model:
-├── Event-sourced (append-only log)
-├── Eventual consistency
-├── Minimum 3 node replication before confirming to client
-└── Encrypted at rest (node operators cannot view)
-
-Transport:
-├── Node-to-node: mTLS + certificate pinning
-├── Client-to-node: TLS 1.3 + certificate pinning
-└── Protocol: gRPC or REST + WebSocket
+┌─────────────────────────────────────────────────────────────┐
+│                    FUTURE KMP ARCHITECTURE                   │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  SHARED (Kotlin Multiplatform)                               │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │  • Upload Manager                                       │ │
+│  │  • Encryption Logic                                     │ │
+│  │  • Federation Protocol                                  │ │
+│  │  • Evidence Hashing                                     │ │
+│  │  • Data Models                                          │ │
+│  └────────────────────────────────────────────────────────┘ │
+│         │                                   │                │
+│         ▼                                   ▼                │
+│  ┌──────────────────┐           ┌──────────────────┐        │
+│  │  Android App     │           │    iOS App       │        │
+│  │  (Existing)      │           │    (New Swift)   │        │
+│  │  Jetpack Compose │           │    SwiftUI       │        │
+│  └──────────────────┘           └──────────────────┘        │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Security Considerations
+### Option 2: Native Swift Port
 
-| Layer | Approach |
-|-------|----------|
-| Transport | TLS 1.3, certificate pinning |
-| At-rest (client) | AES-256-GCM, platform keystore |
-| At-rest (server) | AES-256-GCM, encrypted at upload |
-| E2E encryption | NaCl box (Curve25519 + XSalsa20 + Poly1305) |
-| Key storage | Android Keystore, iOS Keychain |
-| Anonymous auth | Device-generated keys, no PII |
+Separate iOS codebase with shared:
+- API specification
+- Federation protocol
+- Design system
+
+### iOS Limitations to Accept
+
+| Feature | Android | iOS Possible? |
+|---------|---------|---------------|
+| Screen-off video recording | Yes | **No** |
+| Full camouflage | Yes | Limited (icon only) |
+| Sideload distribution | Yes | TestFlight only (requires account) |
+| Background video | Yes | **No** (audio only) |
+| Volume button trigger | Yes | Limited |
+
+**Recommendation:** If iOS is needed, focus on audio recording + location tracking for "witness mode" rather than trying to replicate Android's video capability.
+
+---
+
+## Appendix: Cross-Platform Options Considered
+
+The following options were evaluated before deciding on Android-only native:
+
+### Flutter + Go
+
+**Considered but rejected** because:
+- Still requires native Kotlin modules for camera/background
+- Cross-platform benefit lost with Android-only
+- Adds Dart learning curve and Flutter overhead
+
+### Kotlin Multiplatform
+
+**Deferred to future** because:
+- Valuable for iOS expansion later
+- Overkill for Android-only MVP
+- Added complexity for single platform
+
+### .NET MAUI
+
+**Not recommended** because:
+- Weaker mobile media ecosystem
+- No precedent in human rights/activist space
+- Larger app size
+- Desktop heritage doesn't fit mobile-only MVP
+
+---
+
+## Development Dependencies
+
+### Android Project Setup
+
+```kotlin
+// build.gradle.kts (app module)
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.hilt)
+    alias(libs.plugins.ksp)
+}
+
+android {
+    namespace = "org.witness.app"
+    compileSdk = 34
+
+    defaultConfig {
+        applicationId = "org.witness.app"
+        minSdk = 26
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0.0"
+    }
+
+    buildFeatures {
+        compose = true
+    }
+}
+
+dependencies {
+    // Compose
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.ui)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.navigation)
+
+    // Hilt
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.compiler)
+    implementation(libs.hilt.navigation.compose)
+
+    // Room
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
+
+    // Networking
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.moshi)
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+
+    // CameraX
+    implementation(libs.camerax.core)
+    implementation(libs.camerax.camera2)
+    implementation(libs.camerax.lifecycle)
+    implementation(libs.camerax.video)
+
+    // WorkManager
+    implementation(libs.work.runtime.ktx)
+    implementation(libs.hilt.work)
+
+    // Crypto
+    implementation(libs.tink)
+    implementation(libs.security.crypto)
+
+    // Coroutines
+    implementation(libs.coroutines.android)
+}
+```
+
+### Go Backend Setup
+
+```go
+// go.mod
+module github.com/witness-project/witness-node
+
+go 1.22
+
+require (
+    github.com/gin-gonic/gin v1.9.1
+    github.com/jackc/pgx/v5 v5.5.1
+    github.com/minio/minio-go/v7 v7.0.66
+    github.com/redis/go-redis/v9 v9.4.0
+    github.com/golang-jwt/jwt/v5 v5.2.0
+    github.com/golang-migrate/migrate/v4 v4.17.0
+    golang.org/x/crypto v0.18.0
+    google.golang.org/protobuf v1.32.0
+)
+```
 
 ---
 
@@ -714,8 +859,9 @@ Transport:
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 1.0 | 2026-01-25 | Initial research complete |
+| 1.0 | 2026-01-25 | Initial research (cross-platform options) |
+| 2.0 | 2026-01-26 | Decision: Android-only MVP with native Kotlin |
 
 ---
 
-*This document is a living specification and will be updated as the project evolves.*
+*This document reflects the current technical direction. Architecture may evolve as development progresses.*
