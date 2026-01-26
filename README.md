@@ -38,7 +38,21 @@ Designed to protect against:
 
 Early development — requirements gathering complete.
 
-See [specs/MVP_SPECIFICATION.md](specs/MVP_SPECIFICATION.md) for full specification.
+See [specs/readme.md](specs/readme.md) for the full specification index.
+
+## Development
+
+This project uses the **Ralph Wiggum Loop** methodology for AI-assisted development.
+
+```bash
+# Generate implementation plan from specs
+./loop.sh plan
+
+# Run building mode (implements one task per iteration)
+./loop.sh
+```
+
+See [specs/ralph.md](specs/ralph.md) for methodology details.
 
 ## Contributing
 
