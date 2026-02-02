@@ -1,0 +1,57 @@
+# Android
+*.iml
+.gradle/
+local.properties
+.idea/
+*.hprof
+android/app/build/
+android/build/
+android/.gradle/
+*.apk
+*.aab
+*.dex
+*.class
+
+# Go
+backend/witness-node
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Coverage
+coverage/
+*.coverprofile
+jacoco/
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.config.json
+!*.config.example.json
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Secrets (never commit)
+*.keystore
+*.jks
+google-services.json
+credentials.json
+secrets/
