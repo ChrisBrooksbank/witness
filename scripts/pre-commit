@@ -55,6 +55,14 @@ if echo "$STAGED_FILES" | grep -q "\.go$"; then
     echo "Checking Go files..."
     if [ -d "backend" ]; then
         cd backend
+        # Check formatting
+        UNFORMATTED=$(gofmt -l . 2>/dev/null || true)
+        if [ -n "$UNFORMATTED" ]; then
+            echo -e "${RED}Go files not formatted:${NC}"
+            echo "$UNFORMATTED"
+            echo "Run: cd backend && gofmt -w ."
+            FAILED=1
+        fi
         if ! go build ./... 2>/dev/null; then
             echo -e "${RED}Go build failed${NC}"
             FAILED=1
@@ -63,15 +71,33 @@ if echo "$STAGED_FILES" | grep -q "\.go$"; then
             echo -e "${RED}go vet failed${NC}"
             FAILED=1
         fi
+        # Run golangci-lint if available
+        if command -v golangci-lint &> /dev/null; then
+            if ! golangci-lint run --timeout 2m 2>/dev/null; then
+                echo -e "${RED}golangci-lint failed${NC}"
+                FAILED=1
+            fi
+        fi
         cd "$PROJECT_ROOT"
     fi
 fi
 
-# Block commits with secrets
-if echo "$STAGED_FILES" | grep -qE "(\.env|credentials|secrets|\.keystore|\.jks|google-services\.json)"; then
+# Block commits with secrets (filename-based)
+if echo "$STAGED_FILES" | grep -qE "(\.env|credentials|secrets|\.keystore|\.jks|google-services\.json|\.pem|\.p12|\.pfx)"; then
     echo -e "${RED}Potential secrets detected in staged files!${NC}"
     echo "Review staged files and remove sensitive data."
     FAILED=1
+fi
+
+# Scan staged content for secret patterns
+if [ -n "$STAGED_FILES" ]; then
+    SECRETS_FOUND=$(git diff --cached --diff-filter=ACM -U0 | grep -iE "(api_key|api_secret|password|secret_key|private_key|auth_token)\s*[:=]" || true)
+    if [ -n "$SECRETS_FOUND" ]; then
+        echo -e "${RED}Possible hardcoded secrets in staged changes:${NC}"
+        echo "$SECRETS_FOUND" | head -5
+        echo "Review and remove any real secrets before committing."
+        FAILED=1
+    fi
 fi
 
 if [ $FAILED -eq 0 ]; then

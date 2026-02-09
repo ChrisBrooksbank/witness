@@ -1,0 +1,36 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{kt,kts}]
+indent_size = 4
+max_line_length = 120
+ktlint_code_style = android_studio
+
+# Disable wildcard import rules for common packages
+ktlint_standard_no-wildcard-imports = disabled
+
+# Allow trailing commas
+ktlint_standard_trailing-comma-on-call-site = disabled
+ktlint_standard_trailing-comma-on-declaration-site = disabled
+
+[*.go]
+indent_style = tab
+indent_size = 4
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.{json,xml}]
+indent_size = 4
+
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
