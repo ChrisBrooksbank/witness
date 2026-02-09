@@ -10,7 +10,7 @@ Witness targets Android for MVP, with specific performance, reliability, and com
 
 | ID | Requirement | Priority | MVP |
 |----|-------------|----------|-----|
-| PLT-001 | Minimum SDK: Android 8.0 (API 26) | Must | Yes |
+| PLT-001 | Minimum SDK: Android 10 (API 29) | Must | Yes |
 | PLT-002 | Target SDK: Android 14 (API 34) | Must | Yes |
 | PLT-003 | Support devices with 2GB RAM | Must | Yes |
 | PLT-004 | Support devices with limited storage | Must | Yes |
@@ -58,7 +58,7 @@ Witness targets Android for MVP, with specific performance, reliability, and com
 
 ## Acceptance Criteria
 
-- [ ] AC-PLT-1: App installs on Android 8.0 device
+- [ ] AC-PLT-1: App installs on Android 10 device
 - [ ] AC-PLT-2: App launches in under 3 seconds on mid-range device
 - [ ] AC-PLT-3: Recording starts within 2 seconds of button tap
 - [ ] AC-PLT-4: APK size is under 15MB
@@ -79,7 +79,7 @@ android {
 
     defaultConfig {
         applicationId = "org.witness.app"
-        minSdk = 26
+        minSdk = 29
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
