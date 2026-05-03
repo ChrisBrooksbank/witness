@@ -5,8 +5,8 @@
 
 ## Current Iteration
 
-**Focus:** Non-hardware MVP completion
-**Target:** Finish localization, legal disclaimer, upload settings, and low-battery policy before hardware capture work.
+**Focus:** Hardware capture integration
+**Target:** Implement and validate Camera2 video and audio-only recording on an Android device or emulator.
 
 ## Task List
 
@@ -92,19 +92,19 @@
   - Estimate: L
   - Acceptance: App records a playable 128 kbps AAC audio-only file.
 
-- [ ] **TASK-014**: Implement capture metadata collection
+- [x] **TASK-014**: Implement capture metadata collection - completed 2026-05-03
   - Spec: `specs/01-capture.md`, `specs/04-verification.md`, `specs/10-decisions.md`
   - Depends: TASK-003
   - Estimate: M
   - Acceptance: Metadata records device time, optional NTP time, GPS nullable fallback, orientation, device, and app version.
 
-- [ ] **TASK-015**: Implement volume-button witness mode trigger
+- [x] **TASK-015**: Implement volume-button witness mode trigger - completed 2026-05-03
   - Spec: `specs/03-safety.md`, `specs/10-decisions.md`
   - Depends: TASK-010
   - Estimate: L
   - Acceptance: Up-up-down-down sequence within 500ms gaps starts witness mode with a 5-second cancel window.
 
-- [ ] **TASK-016**: Implement encrypted upload-and-delete lifecycle
+- [x] **TASK-016**: Implement encrypted upload-and-delete lifecycle - completed 2026-05-03
   - Spec: `specs/02-upload.md`, `specs/03-safety.md`, `specs/06-security.md`
   - Depends: TASK-006, TASK-009
   - Estimate: L
@@ -138,13 +138,13 @@
 
 ### P3: Nice to Have
 
-- [ ] **TASK-021**: Research C2PA compatibility path
+- [x] **TASK-021**: Research C2PA compatibility path - completed 2026-05-03
   - Spec: `specs/04-verification.md`, `specs/10-decisions.md`
   - Depends: TASK-004
   - Estimate: M
   - Acceptance: Research note compares C2PA adoption cost against MVP hash/signature chain.
 
-- [ ] **TASK-022**: Design post-MVP federation replication protocol
+- [x] **TASK-022**: Design post-MVP federation replication protocol - completed 2026-05-03
   - Spec: `specs/05-federation.md`, `specs/10-decisions.md`
   - Depends: TASK-008
   - Estimate: L
@@ -206,6 +206,27 @@
 
 - [x] **TASK-020**: Add low-battery quality policy - completed 2026-05-03
   - Added battery policy for keep-video, audio-only fallback below 15%, and graceful stop at 5%, with unit tests.
+
+- [x] **TASK-014**: Implement capture metadata collection - completed 2026-05-03
+  - Added Android metadata collection for device/app version, device time, optional network time, nullable last-known location, and screen orientation.
+  - Metadata collection reports explicit fallback reasons when location permission or last-known location is unavailable.
+
+- [x] **TASK-015**: Implement volume-button witness mode trigger - completed 2026-05-03
+  - Added tested up-up-down-down volume sequence detection with 500ms maximum gaps.
+  - Wired the real UI to arm witness mode with a 5-second cancel window, subtle vibration feedback, and foreground capture service startup in witness mode.
+
+- [x] **TASK-016**: Implement encrypted upload-and-delete lifecycle - completed 2026-05-03
+  - Added AES-GCM encrypted app-private chunk storage backed by Android Keystore keys and `.nomedia` protection.
+  - Updated the upload worker to register evidence hashes, upload encrypted chunks over the MVP REST contract, mark confirmed uploads, and schedule 24-hour deletion.
+  - Added periodic retention cleanup to delete confirmed encrypted chunk files and purge Room rows after the deletion deadline.
+  - Added backend upload endpoints for hash registration, chunk upload with SHA-256 verification, and evidence verification lookup.
+
+- [x] **TASK-021**: Research C2PA compatibility path - completed 2026-05-03
+  - Added `docs/research/c2pa-compatibility.md` comparing C2PA adoption against the MVP Witness hash/signature chain.
+  - Recommendation: keep Witness capture-time verification canonical, then add server-side C2PA export post-MVP.
+
+- [x] **TASK-022**: Design post-MVP federation replication protocol - completed 2026-05-03
+  - Added `docs/design/federation-replication.md` covering node identity, trust bundles, replication manifests, signed receipts, revocation, and conflict handling.
 
 ## Blocked
 

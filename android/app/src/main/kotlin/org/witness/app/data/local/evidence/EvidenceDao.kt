@@ -11,6 +11,9 @@ interface EvidenceDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertEvidence(evidence: EvidenceEntity)
 
+    @Query("SELECT * FROM evidence WHERE id = :evidenceId")
+    suspend fun getEvidence(evidenceId: String): EvidenceEntity?
+
     @Query("SELECT * FROM evidence WHERE upload_status != :completeStatus ORDER BY captured_at_epoch_millis ASC")
     fun observePendingEvidence(completeStatus: String = UploadStatus.Complete.name): Flow<List<EvidenceEntity>>
 

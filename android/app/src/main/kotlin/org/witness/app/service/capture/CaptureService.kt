@@ -20,6 +20,8 @@ import org.witness.app.domain.model.RecordingState
 private const val ACTION_START = "org.witness.app.action.START_CAPTURE"
 private const val ACTION_STOP = "org.witness.app.action.STOP_CAPTURE"
 private const val EXTRA_EVIDENCE_ID = "evidence_id"
+private const val EXTRA_CAPTURE_MODE = "capture_mode"
+private const val EXTRA_MEDIA_TYPE = "media_type"
 private const val NOTIFICATION_ID = 1001
 private const val CHANNEL_ID = "capture_status"
 
@@ -54,12 +56,14 @@ class CaptureService : Service() {
 
     private fun startCapture(intent: Intent) {
         val evidenceId = intent.getStringExtra(EXTRA_EVIDENCE_ID) ?: newEvidenceId()
+        val captureMode = parseCaptureMode(intent.getStringExtra(EXTRA_CAPTURE_MODE))
+        val mediaType = parseMediaType(intent.getStringExtra(EXTRA_MEDIA_TYPE))
         CaptureServiceState.update(
             RecordingState.Active(
                 evidenceId = evidenceId,
                 startedAt = Instant.now(),
-                mode = CaptureMode.Standard,
-                mediaType = MediaType.Video,
+                mode = captureMode,
+                mediaType = mediaType,
                 quality = CaptureQuality.DefaultVideo,
             ),
         )
@@ -120,11 +124,26 @@ class CaptureService : Service() {
         return "evidence-${System.currentTimeMillis()}"
     }
 
+    private fun parseCaptureMode(value: String?): CaptureMode {
+        return CaptureMode.entries.firstOrNull { it.name == value } ?: CaptureMode.Standard
+    }
+
+    private fun parseMediaType(value: String?): MediaType {
+        return MediaType.entries.firstOrNull { it.name == value } ?: MediaType.Video
+    }
+
     companion object {
-        fun startIntent(context: Context, evidenceId: String): Intent {
+        fun startIntent(
+            context: Context,
+            evidenceId: String,
+            captureMode: CaptureMode = CaptureMode.Standard,
+            mediaType: MediaType = MediaType.Video,
+        ): Intent {
             return Intent(context, CaptureService::class.java)
                 .setAction(ACTION_START)
                 .putExtra(EXTRA_EVIDENCE_ID, evidenceId)
+                .putExtra(EXTRA_CAPTURE_MODE, captureMode.name)
+                .putExtra(EXTRA_MEDIA_TYPE, mediaType.name)
         }
 
         fun stopIntent(context: Context): Intent {

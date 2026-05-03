@@ -3,6 +3,8 @@ package health
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/witness-org/witness/backend/internal/evidence"
 )
 
 const version = "0.1.0"
@@ -16,6 +18,7 @@ func NewHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth)
 	mux.HandleFunc("GET /api/v1/version", handleVersion)
+	evidence.RegisterHandlers(mux, evidence.NewStore())
 	return mux
 }
 

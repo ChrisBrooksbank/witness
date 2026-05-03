@@ -16,6 +16,9 @@ interface EvidenceChunkDao {
         completeStatus: String = UploadStatus.Complete.name,
     ): List<EvidenceChunkEntity>
 
+    @Query("SELECT * FROM evidence_chunks WHERE evidence_id = :evidenceId ORDER BY chunk_index ASC")
+    suspend fun getChunks(evidenceId: String): List<EvidenceChunkEntity>
+
     @Query(
         """
         UPDATE evidence_chunks
