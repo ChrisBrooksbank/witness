@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Witness</string>
+    <string name="evidence">Evidence</string>
+    <string name="home">Home</string>
+    <string name="queue">Queue</string>
+    <string name="record">Record</string>
+    <string name="record_evidence">Record evidence</string>
+    <string name="ready">Ready</string>
+    <string name="ready_description">Ready to record</string>
+    <string name="recording_status">Recording</string>
+    <string name="status_description">Status: %1$s</string>
+    <string name="stop">Stop</string>
+    <string name="upload_status">Upload queue empty</string>
+    <string name="witness_mode">Witness mode</string>
+    <string name="witness_mode_hint">Use volume up, volume up, volume down, volume down</string>
+</resources>

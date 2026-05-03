@@ -1,51 +1,174 @@
 # Witness Implementation Plan
 
-**Generated:** [Run planning mode to generate]
-**Status:** Template
-
-## Overview
-
-This file tracks the implementation progress for the Witness app. It is generated and updated by the Ralph Wiggum loop.
-
-## How to Use
-
-1. Run `./loop.sh plan` to generate/update this plan from specs
-2. Run `./loop.sh` to implement tasks one at a time
-3. Each completed task should be marked with `[x]` and a timestamp
+**Generated:** 2026-05-03
+**Status:** Active
 
 ## Current Iteration
 
-**Focus:** [To be determined by planning mode]
-**Target:** [To be determined by planning mode]
+**Focus:** Android app shell
+**Target:** Provide a high-contrast recording surface with visible status, accessible controls, and an initial navigation surface.
 
 ## Task List
 
 ### P0: Critical Path
 
-[Planning mode will populate this section]
+- [x] **TASK-001**: Scaffold Android and Go project foundations - completed 2026-05-03
+  - Spec: `specs/08-platform.md`, `specs/10-decisions.md`, `AGENTS.md`
+  - Depends: none
+  - Estimate: M
+  - Acceptance: Android project declares `org.witness.app`, min SDK 29, target SDK 34; backend has a Go module and health endpoint; repo has runnable build entrypoints expected by CI.
+
+- [x] **TASK-002**: Add core Android application shell and navigation surface - completed 2026-05-03
+  - Spec: `specs/07-ux.md`, `specs/08-platform.md`
+  - Depends: TASK-001
+  - Estimate: M
+  - Acceptance: App launches to a high-contrast recording surface with accessible record controls and status text.
+
+- [ ] **TASK-003**: Add domain models for evidence metadata and capture state
+  - Spec: `specs/01-capture.md`, `specs/04-verification.md`
+  - Depends: TASK-001
+  - Estimate: S
+  - Acceptance: Evidence metadata, device info, location, chunk hash, and recording state models exist with unit tests.
+
+- [ ] **TASK-004**: Implement SHA-256 chunk hashing and Merkle root calculation
+  - Spec: `specs/04-verification.md`, `specs/10-decisions.md`
+  - Depends: TASK-003
+  - Estimate: M
+  - Acceptance: Hashing utility generates stable chunk hashes and Merkle roots with tests for empty, single, odd, and even chunk lists.
+
+- [ ] **TASK-005**: Implement local key generation abstraction
+  - Spec: `specs/06-security.md`
+  - Depends: TASK-003
+  - Estimate: M
+  - Acceptance: Android Keystore-backed signing key manager interface exists with tests around non-platform canonicalization logic.
+
+- [ ] **TASK-006**: Add encrypted cache schema for pending evidence
+  - Spec: `specs/03-safety.md`, `specs/06-security.md`
+  - Depends: TASK-003
+  - Estimate: L
+  - Acceptance: Room schema tracks evidence, chunks, upload status, and 24-hour confirmed-upload deletion deadline.
+
+- [ ] **TASK-007**: Implement MVP backend health and version endpoints
+  - Spec: `specs/05-federation.md`, `specs/08-platform.md`, `specs/10-decisions.md`
+  - Depends: TASK-001
+  - Estimate: S
+  - Acceptance: Go server exposes `/health` and `/api/v1/version` with tests.
+
+- [ ] **TASK-008**: Define single-node upload API contracts
+  - Spec: `specs/02-upload.md`, `specs/10-decisions.md`
+  - Depends: TASK-007
+  - Estimate: M
+  - Acceptance: Backend request/response DTOs and Android Retrofit interfaces cover hash registration and chunk upload.
+
+- [ ] **TASK-009**: Add WorkManager upload queue skeleton
+  - Spec: `specs/02-upload.md`, `specs/03-safety.md`
+  - Depends: TASK-006, TASK-008
+  - Estimate: M
+  - Acceptance: Upload worker reads queued chunks, applies connected-network constraint, and records retryable failure states.
+
+- [ ] **TASK-010**: Add capture service skeleton for foreground recording
+  - Spec: `specs/01-capture.md`, `specs/03-safety.md`, `specs/08-platform.md`
+  - Depends: TASK-002, TASK-003
+  - Estimate: L
+  - Acceptance: Foreground service starts/stops cleanly, owns notification channel, and exposes state without recording media yet.
 
 ### P1: MVP Features
 
-[Planning mode will populate this section]
+- [ ] **TASK-011**: Implement calculator camouflage launcher
+  - Spec: `specs/03-safety.md`, `specs/07-ux.md`
+  - Depends: TASK-002
+  - Estimate: M
+  - Acceptance: Default launcher appears as Calculator, supports basic arithmetic, and unlocks real UI via secret calculation.
+
+- [ ] **TASK-012**: Implement Camera2 720p H.264 video capture
+  - Spec: `specs/01-capture.md`, `specs/10-decisions.md`
+  - Depends: TASK-010
+  - Estimate: XL
+  - Acceptance: App records a playable 720p/30fps H.264 MP4 segment.
+
+- [ ] **TASK-013**: Implement audio-only AAC capture fallback
+  - Spec: `specs/01-capture.md`, `specs/10-decisions.md`
+  - Depends: TASK-010
+  - Estimate: L
+  - Acceptance: App records a playable 128 kbps AAC audio-only file.
+
+- [ ] **TASK-014**: Implement capture metadata collection
+  - Spec: `specs/01-capture.md`, `specs/04-verification.md`, `specs/10-decisions.md`
+  - Depends: TASK-003
+  - Estimate: M
+  - Acceptance: Metadata records device time, optional NTP time, GPS nullable fallback, orientation, device, and app version.
+
+- [ ] **TASK-015**: Implement volume-button witness mode trigger
+  - Spec: `specs/03-safety.md`, `specs/10-decisions.md`
+  - Depends: TASK-010
+  - Estimate: L
+  - Acceptance: Up-up-down-down sequence within 500ms gaps starts witness mode with a 5-second cancel window.
+
+- [ ] **TASK-016**: Implement encrypted upload-and-delete lifecycle
+  - Spec: `specs/02-upload.md`, `specs/03-safety.md`, `specs/06-security.md`
+  - Depends: TASK-006, TASK-009
+  - Estimate: L
+  - Acceptance: Evidence remains only in encrypted cache, uploads on any connection by default, and schedules deletion 24 hours after server confirmation.
+
+- [ ] **TASK-017**: Add English and Spanish resources for MVP flows
+  - Spec: `specs/07-ux.md`, `specs/10-decisions.md`
+  - Depends: TASK-002
+  - Estimate: S
+  - Acceptance: User-facing strings for onboarding, recording status, errors, legal disclaimer, and calculator unlock exist in English and Spanish.
 
 ### P2: Important
 
-[Planning mode will populate this section]
+- [ ] **TASK-018**: Add legal disclaimer and Know Your Rights resource links
+  - Spec: `specs/09-legal.md`, `specs/10-decisions.md`
+  - Depends: TASK-002
+  - Estimate: S
+  - Acceptance: First launch shows US-focused disclaimer, not legal advice notice, and accessible resources link.
+
+- [ ] **TASK-019**: Add WiFi-only upload setting
+  - Spec: `specs/02-upload.md`, `specs/10-decisions.md`
+  - Depends: TASK-009
+  - Estimate: S
+  - Acceptance: User can restrict large uploads to WiFi; default remains any connection.
+
+- [ ] **TASK-020**: Add low-battery quality policy
+  - Spec: `specs/01-capture.md`, `specs/02-upload.md`, `specs/10-decisions.md`
+  - Depends: TASK-010
+  - Estimate: M
+  - Acceptance: Battery below 15% reduces quality/audio-only; below 5% stops recording gracefully.
 
 ### P3: Nice to Have
 
-[Planning mode will populate this section]
+- [ ] **TASK-021**: Research C2PA compatibility path
+  - Spec: `specs/04-verification.md`, `specs/10-decisions.md`
+  - Depends: TASK-004
+  - Estimate: M
+  - Acceptance: Research note compares C2PA adoption cost against MVP hash/signature chain.
+
+- [ ] **TASK-022**: Design post-MVP federation replication protocol
+  - Spec: `specs/05-federation.md`, `specs/10-decisions.md`
+  - Depends: TASK-008
+  - Estimate: L
+  - Acceptance: Protocol design covers node auth, replication, and revocation conflict handling for multi-node rollout.
 
 ## Completed
 
-[Completed tasks will be moved here]
+- [x] **TASK-001**: Scaffold Android and Go project foundations - completed 2026-05-03
+  - Added Android Gradle/Compose project shell with min SDK 29, target SDK 34, package `org.witness.app`, permissions baseline, and a minimal high-contrast launch surface.
+  - Added Go backend module with `/health` and `/api/v1/version` endpoints plus unit tests.
+
+- [x] **TASK-002**: Add core Android application shell and navigation surface - completed 2026-05-03
+  - Added always-visible recording status bar, large accessible record/stop control, witness-mode activation hint, and upload queue navigation surface.
+  - Kept the screen high contrast and one-handed friendly while deferring real capture behavior to `TASK-010`.
 
 ## Blocked
 
-[Blocked tasks will be listed here with their blockers]
+- [ ] **TASK-012**: Implement Camera2 720p H.264 video capture
+  - Blocker: Requires Android project foundation and device/emulator validation.
+  - Unblocks: end-to-end capture acceptance criteria.
 
 ## Notes
 
-- Run `./loop.sh plan` to generate initial task list from specifications
-- See `specs/readme.md` for requirement priorities
-- See `AGENTS.md` for quality gates that must pass before marking tasks complete
+- `specs/10-decisions.md` is authoritative where it conflicts with earlier specs.
+- MVP excludes live streaming, full federation/discovery, Bluetooth mesh, sentry mode, and panic wipe.
+- Local development environment currently needs Java/Gradle/Go installed before full quality gates can run on this machine.
+- Android UI shell compiles and builds locally with a temporary JDK/SDK setup; device/emulator visual launch is pending because ADB reports no attached targets.
