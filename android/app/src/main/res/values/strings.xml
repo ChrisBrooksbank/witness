@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Witness</string>
+    <string name="app_name">Calculator</string>
+    <string name="calculator_app_name">Calculator</string>
+    <string name="calculator_clear">Clear</string>
     <string name="evidence">Evidence</string>
     <string name="home">Home</string>
     <string name="queue">Queue</string>
+    <string name="settings">Settings</string>
     <string name="record">Record</string>
     <string name="record_evidence">Record evidence</string>
     <string name="ready">Ready</string>
@@ -11,7 +14,15 @@
     <string name="recording_status">Recording</string>
     <string name="status_description">Status: %1$s</string>
     <string name="stop">Stop</string>
+    <string name="capture_notification_channel">Recording status</string>
+    <string name="capture_notification_title">Recording active</string>
+    <string name="capture_notification_text">Witness is preserving evidence</string>
     <string name="upload_status">Upload queue empty</string>
+    <string name="wifi_only_uploads">WiFi-only uploads</string>
+    <string name="wifi_only_uploads_description">Large uploads will wait for WiFi when enabled.</string>
     <string name="witness_mode">Witness mode</string>
     <string name="witness_mode_hint">Use volume up, volume up, volume down, volume down</string>
+    <string name="legal_disclaimer_title">Before recording</string>
+    <string name="legal_disclaimer_body">Recording laws vary by jurisdiction. This app does not provide legal advice. You are responsible for understanding the laws in your area. US Know Your Rights resources are available from trusted civil rights organizations.</string>
+    <string name="i_understand">I understand</string>
 </resources>

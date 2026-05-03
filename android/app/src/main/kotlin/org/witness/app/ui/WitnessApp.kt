@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -23,6 +25,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +60,7 @@ private enum class MainDestination(
 ) {
     Home(R.string.home),
     Queue(R.string.queue),
+    Settings(R.string.settings),
 }
 
 private sealed class RecordingUiState(
@@ -82,6 +86,8 @@ private sealed class RecordingUiState(
 fun WitnessApp() {
     var selectedDestination by remember { mutableStateOf(MainDestination.Home) }
     var recordingState: RecordingUiState by remember { mutableStateOf(RecordingUiState.Ready) }
+    var hasAcceptedDisclaimer by remember { mutableStateOf(false) }
+    var wifiOnlyUploads by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -113,8 +119,18 @@ fun WitnessApp() {
                 )
 
                 MainDestination.Queue -> UploadQueueScreen()
+                MainDestination.Settings -> SettingsScreen(
+                    wifiOnlyUploads = wifiOnlyUploads,
+                    onWifiOnlyUploadsChanged = { wifiOnlyUploads = it },
+                )
             }
         }
+    }
+
+    if (!hasAcceptedDisclaimer) {
+        LegalDisclaimerDialog(
+            onAccepted = { hasAcceptedDisclaimer = true },
+        )
     }
 }
 
@@ -256,6 +272,58 @@ private fun UploadQueueScreen() {
             textAlign = TextAlign.Center,
         )
     }
+}
+
+@Composable
+@Suppress("FunctionName")
+private fun SettingsScreen(wifiOnlyUploads: Boolean, onWifiOnlyUploadsChanged: (Boolean) -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(ScreenPadding),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(
+                checked = wifiOnlyUploads,
+                onCheckedChange = onWifiOnlyUploadsChanged,
+            )
+            Spacer(modifier = Modifier.width(IconSpacing))
+            Column {
+                Text(
+                    text = stringResource(R.string.wifi_only_uploads),
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    text = stringResource(R.string.wifi_only_uploads_description),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+@Suppress("FunctionName")
+private fun LegalDisclaimerDialog(onAccepted: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = {
+            Text(text = stringResource(R.string.legal_disclaimer_title))
+        },
+        text = {
+            Text(text = stringResource(R.string.legal_disclaimer_body))
+        },
+        confirmButton = {
+            TextButton(onClick = onAccepted) {
+                Text(text = stringResource(R.string.i_understand))
+            }
+        },
+    )
 }
 
 @Composable
