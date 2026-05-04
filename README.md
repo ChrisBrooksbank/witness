@@ -25,6 +25,14 @@ Protect people who document injustice. Safety first, evidence second.
 - **Verification** — SHA-256 hash at capture for tamper-proof evidence
 - **Low battery mode** — Adaptive quality for extended use
 
+## Using the App
+
+The Android app launches as a calculator. To open Witness, enter the secret calculator password:
+
+```text
+1312=
+```
+
 ## Threat Model
 
 Designed to protect against:
