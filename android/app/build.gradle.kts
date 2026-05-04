@@ -28,12 +28,8 @@ android {
     buildTypes {
         debug {
             isDebuggable = false
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro",
-            )
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
 
         release {
@@ -80,6 +76,7 @@ dependencies {
     implementation(libs.retrofit.moshi)
     implementation(libs.okhttp)
     implementation(libs.moshi)
+    implementation(libs.moshi.kotlin)
     implementation(libs.work.runtime.ktx)
 
     ksp(libs.room.compiler)
