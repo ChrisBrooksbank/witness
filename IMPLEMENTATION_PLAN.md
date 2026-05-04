@@ -80,17 +80,19 @@
   - Estimate: M
   - Acceptance: Default launcher appears as Calculator, supports basic arithmetic, and unlocks real UI via secret calculation.
 
-- [ ] **TASK-012**: Implement Camera2 720p H.264 video capture
+- [x] **TASK-012**: Implement Camera2 720p H.264 video capture - completed 2026-05-04
   - Spec: `specs/01-capture.md`, `specs/10-decisions.md`
   - Depends: TASK-010
   - Estimate: XL
   - Acceptance: App records a playable 720p/30fps H.264 MP4 segment.
+  - Progress: Added Camera2 + MediaRecorder foreground-service recording path for app-private 720p H.264 MP4 output, connected the main record button to the service, and validated playable 1280x720 H.264/AAC output on the API 34 emulator.
 
-- [ ] **TASK-013**: Implement audio-only AAC capture fallback
+- [x] **TASK-013**: Implement audio-only AAC capture fallback - completed 2026-05-04
   - Spec: `specs/01-capture.md`, `specs/10-decisions.md`
   - Depends: TASK-010
   - Estimate: L
   - Acceptance: App records a playable 128 kbps AAC audio-only file.
+  - Progress: Added MediaRecorder AAC audio-only path for service requests with `MediaType.Audio`, wired low-battery fallback below 15%, and validated playable `.m4a` output on the API 34 emulator.
 
 - [x] **TASK-014**: Implement capture metadata collection - completed 2026-05-03
   - Spec: `specs/01-capture.md`, `specs/04-verification.md`, `specs/10-decisions.md`
@@ -228,15 +230,21 @@
 - [x] **TASK-022**: Design post-MVP federation replication protocol - completed 2026-05-03
   - Added `docs/design/federation-replication.md` covering node identity, trust bundles, replication manifests, signed receipts, revocation, and conflict handling.
 
+- [x] **TASK-012**: Implement Camera2 720p H.264 video capture - completed 2026-05-04
+  - Added Camera2 + MediaRecorder capture behind the existing foreground service.
+  - Validated a playable app-private MP4 on `Witness_API_34`; `ffprobe` reports H.264 video at 1280x720 with AAC audio.
+
+- [x] **TASK-013**: Implement audio-only AAC capture fallback - completed 2026-05-04
+  - Added audio-only MediaRecorder capture and a tested domain policy that downgrades below 15% battery or stops below 5%.
+  - Validated low-battery fallback on `Witness_API_34`; emulator battery level 14% produced a playable app-private `.m4a` with AAC audio.
+
 ## Blocked
 
-- [ ] **TASK-012**: Implement Camera2 720p H.264 video capture
-  - Blocker: Requires Android project foundation and device/emulator validation.
-  - Unblocks: end-to-end capture acceptance criteria.
+- None.
 
 ## Notes
 
 - `specs/10-decisions.md` is authoritative where it conflicts with earlier specs.
 - MVP excludes live streaming, full federation/discovery, Bluetooth mesh, sentry mode, and panic wipe.
-- Local development environment currently needs Java/Gradle/Go installed before full quality gates can run on this machine.
-- Android UI shell compiles and builds locally with a temporary JDK/SDK setup; device/emulator visual launch is pending because ADB reports no attached targets.
+- Local Android quality gates run against the installed Android SDK at `C:\Users\chris\AppData\Local\Android\Sdk`.
+- API 34 emulator `Witness_API_34` is available for device validation.

@@ -17,6 +17,7 @@
     <string name="capture_notification_channel">Estado de grabación</string>
     <string name="capture_notification_title">Grabación activa</string>
     <string name="capture_notification_text">Witness está preservando evidencia</string>
+    <string name="capture_error_battery_too_low">La batería está demasiado baja para iniciar una grabación de forma segura.</string>
     <string name="upload_status">La cola de subida está vacía</string>
     <string name="wifi_only_uploads">Subidas solo por WiFi</string>
     <string name="wifi_only_uploads_description">Las subidas grandes esperarán WiFi cuando esté activado.</string>

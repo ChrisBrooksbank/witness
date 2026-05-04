@@ -6,7 +6,9 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -16,6 +18,9 @@ import org.witness.app.domain.model.CaptureMode
 import org.witness.app.domain.model.CaptureQuality
 import org.witness.app.domain.model.MediaType
 import org.witness.app.domain.model.RecordingState
+import org.witness.app.domain.policy.BatteryCapturePolicy
+import org.witness.app.domain.policy.CaptureStartDecision
+import org.witness.app.domain.policy.CaptureStartPolicy
 
 private const val ACTION_START = "org.witness.app.action.START_CAPTURE"
 private const val ACTION_STOP = "org.witness.app.action.STOP_CAPTURE"
@@ -24,12 +29,19 @@ private const val EXTRA_CAPTURE_MODE = "capture_mode"
 private const val EXTRA_MEDIA_TYPE = "media_type"
 private const val NOTIFICATION_ID = 1001
 private const val CHANNEL_ID = "capture_status"
+private const val FULL_BATTERY_SCALE_PERCENT = 100
 
-class CaptureService : Service() {
+@Suppress("TooManyFunctions")
+class CaptureService : Service(), HardwareCaptureRecorder.Listener {
+    private lateinit var recorder: HardwareCaptureRecorder
+    private val batteryCapturePolicy = BatteryCapturePolicy()
+    private val captureStartPolicy = CaptureStartPolicy()
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        recorder = HardwareCaptureRecorder(applicationContext, this)
         ensureNotificationChannel()
     }
 
@@ -50,24 +62,52 @@ class CaptureService : Service() {
     }
 
     override fun onDestroy() {
+        recorder.stop()
         CaptureServiceState.update(RecordingState.Idle)
         super.onDestroy()
     }
 
     private fun startCapture(intent: Intent) {
         val evidenceId = intent.getStringExtra(EXTRA_EVIDENCE_ID) ?: newEvidenceId()
-        val captureMode = parseCaptureMode(intent.getStringExtra(EXTRA_CAPTURE_MODE))
-        val mediaType = parseMediaType(intent.getStringExtra(EXTRA_MEDIA_TYPE))
+        val requestedCaptureMode = parseCaptureMode(intent.getStringExtra(EXTRA_CAPTURE_MODE))
+        val requestedMediaType = parseMediaType(intent.getStringExtra(EXTRA_MEDIA_TYPE))
+        val decision = captureStartDecision(requestedCaptureMode, requestedMediaType)
+        startForegroundCompat(createNotification())
+
+        when (decision) {
+            is CaptureStartDecision.Start -> startRecorder(evidenceId, decision)
+            CaptureStartDecision.StopGracefully -> stopForCriticalBattery()
+        }
+    }
+
+    private fun startRecorder(evidenceId: String, decision: CaptureStartDecision.Start) {
         CaptureServiceState.update(
             RecordingState.Active(
                 evidenceId = evidenceId,
                 startedAt = Instant.now(),
-                mode = captureMode,
-                mediaType = mediaType,
+                mode = decision.captureMode,
+                mediaType = decision.mediaType,
                 quality = CaptureQuality.DefaultVideo,
             ),
         )
-        startForegroundCompat(createNotification())
+        recorder.start(
+            HardwareCaptureRequest(
+                evidenceId = evidenceId,
+                mediaType = decision.mediaType,
+                quality = CaptureQuality.DefaultVideo,
+            ),
+        )
+    }
+
+    private fun stopForCriticalBattery() {
+        CaptureServiceState.update(
+            RecordingState.Error(
+                message = getString(R.string.capture_error_battery_too_low),
+                occurredAt = Instant.now(),
+            ),
+        )
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     private fun stopCapture() {
@@ -80,7 +120,21 @@ class CaptureService : Service() {
                 ),
             )
         }
+        recorder.stop()
         CaptureServiceState.update(RecordingState.Idle)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    override fun onCaptureStarted(output: HardwareCaptureOutput) = Unit
+
+    override fun onCaptureError(message: String) {
+        CaptureServiceState.update(
+            RecordingState.Error(
+                message = message,
+                occurredAt = Instant.now(),
+            ),
+        )
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -130,6 +184,27 @@ class CaptureService : Service() {
 
     private fun parseMediaType(value: String?): MediaType {
         return MediaType.entries.firstOrNull { it.name == value } ?: MediaType.Video
+    }
+
+    private fun captureStartDecision(requestedMode: CaptureMode, requestedMediaType: MediaType): CaptureStartDecision {
+        val batteryAction = batteryCapturePolicy.actionForBatteryPercent(currentBatteryPercent())
+        return captureStartPolicy.decisionFor(
+            requestedMode = requestedMode,
+            requestedMediaType = requestedMediaType,
+            batteryAction = batteryAction,
+        )
+    }
+
+    private fun currentBatteryPercent(): Int {
+        val batteryIntent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+
+        return if (level >= 0 && scale > 0) {
+            level * FULL_BATTERY_SCALE_PERCENT / scale
+        } else {
+            FULL_BATTERY_SCALE_PERCENT
+        }
     }
 
     companion object {

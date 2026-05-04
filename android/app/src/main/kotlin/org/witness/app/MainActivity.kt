@@ -1,6 +1,8 @@
 package org.witness.app
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -10,6 +12,7 @@ import android.os.VibratorManager
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.witness.app.data.upload.EvidenceRetentionWorker
 import org.witness.app.domain.model.CaptureMode
@@ -23,6 +26,7 @@ import org.witness.app.ui.theme.WitnessTheme
 
 private const val WITNESS_ARMED_VIBRATION_MILLIS = 60L
 private const val WITNESS_STARTED_VIBRATION_MILLIS = 120L
+private const val CAPTURE_PERMISSION_REQUEST = 20
 
 class MainActivity : ComponentActivity() {
     private val sequenceDetector = WitnessModeSequenceDetector()
@@ -32,6 +36,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         EvidenceRetentionWorker.enqueuePeriodic(this)
+        requestCapturePermissions()
         setContent {
             WitnessTheme {
                 WitnessApp()
@@ -99,5 +104,26 @@ class MainActivity : ComponentActivity() {
             getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         }
         vibrator.vibrate(VibrationEffect.createOneShot(durationMillis, VibrationEffect.DEFAULT_AMPLITUDE))
+    }
+
+    private fun requestCapturePermissions() {
+        val missingPermissions = capturePermissions().filter { permission ->
+            ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED
+        }
+
+        if (missingPermissions.isNotEmpty()) {
+            ActivityCompat.requestPermissions(
+                this,
+                missingPermissions.toTypedArray(),
+                CAPTURE_PERMISSION_REQUEST,
+            )
+        }
+    }
+
+    private fun capturePermissions(): List<String> {
+        return listOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.RECORD_AUDIO,
+        )
     }
 }
