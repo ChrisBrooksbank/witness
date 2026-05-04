@@ -48,6 +48,8 @@ Early development — requirements gathering complete.
 
 See [specs/readme.md](specs/readme.md) for the full specification index.
 
+See [docs/design/group-backend-setup-plan.md](docs/design/group-backend-setup-plan.md) for the plan to make running a Witness backend for a group feel like setting up a small appliance, not becoming a backend engineer.
+
 ## Development
 
 This project uses the **Ralph Wiggum Loop** methodology for AI-assisted development.
