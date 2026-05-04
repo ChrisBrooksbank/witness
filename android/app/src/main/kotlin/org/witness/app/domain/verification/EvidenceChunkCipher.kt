@@ -1,6 +1,5 @@
 package org.witness.app.domain.verification
 
-import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
@@ -9,17 +8,12 @@ private const val AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding"
 private const val GCM_TAG_BITS = 128
 private const val GCM_IV_BYTES = 12
 
-class EvidenceChunkCipher(
-    private val secureRandom: SecureRandom = SecureRandom(),
-) {
+class EvidenceChunkCipher {
     fun encrypt(plaintext: ByteArray, secretKey: SecretKey): EncryptedPayload {
-        val iv = ByteArray(GCM_IV_BYTES)
-        secureRandom.nextBytes(iv)
-
         val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_BITS, iv))
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey)
         return EncryptedPayload(
-            iv = iv,
+            iv = cipher.iv,
             ciphertext = cipher.doFinal(plaintext),
         )
     }

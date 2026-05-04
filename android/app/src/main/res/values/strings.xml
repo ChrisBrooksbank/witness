@@ -18,7 +18,9 @@
     <string name="capture_notification_title">Recording active</string>
     <string name="capture_notification_text">Witness is preserving evidence</string>
     <string name="capture_error_battery_too_low">Battery is too low to start recording safely.</string>
+    <string name="capture_error_queue_failed">Recording finished but could not be queued for upload.</string>
     <string name="upload_status">Upload queue empty</string>
+    <string name="upload_status_pending">Upload queue: %1$d pending</string>
     <string name="wifi_only_uploads">WiFi-only uploads</string>
     <string name="wifi_only_uploads_description">Large uploads will wait for WiFi when enabled.</string>
     <string name="witness_mode">Witness mode</string>

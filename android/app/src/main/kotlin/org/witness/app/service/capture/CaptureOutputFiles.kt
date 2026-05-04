@@ -19,6 +19,15 @@ object CaptureOutputFiles {
         return File(directory, fileName(evidenceId, mediaType, timestampMillis))
     }
 
+    fun latestFor(context: Context, evidenceId: String, mediaType: MediaType): File? {
+        val directory = File(context.filesDir, CAPTURE_DIRECTORY)
+        val prefix = "${sanitize(evidenceId)}-"
+        val suffix = ".${extensionFor(mediaType)}"
+        return directory
+            .listFiles { file -> file.isFile && file.name.startsWith(prefix) && file.name.endsWith(suffix) }
+            ?.maxByOrNull { file -> file.lastModified() }
+    }
+
     fun fileName(evidenceId: String, mediaType: MediaType, timestampMillis: Long): String {
         return "${sanitize(evidenceId)}-$timestampMillis.${extensionFor(mediaType)}"
     }

@@ -35,6 +35,7 @@ class HardwareCaptureRecorder(
     private var captureSession: CameraCaptureSession? = null
     private var cameraThread: HandlerThread? = null
     private var cameraHandler: Handler? = null
+    private var activeOutput: HardwareCaptureOutput? = null
 
     fun start(request: HardwareCaptureRequest) {
         if (!hasAudioPermission()) {
@@ -49,14 +50,17 @@ class HardwareCaptureRecorder(
         }
     }
 
-    fun stop() {
-        stopMediaRecorder()
+    fun stop(): HardwareRecorderStopResult {
+        val mediaRecorderResult = stopMediaRecorder()
         closeCamera()
         stopCameraThread()
+        return mediaRecorderResult
     }
 
     private fun startAudioOnly(request: HardwareCaptureRequest) {
         val outputFile = outputFileFor(request)
+        val output = HardwareCaptureOutput(outputFile, MediaType.Audio)
+        activeOutput = output
         val recorder = newMediaRecorder()
         mediaRecorder = recorder
 
@@ -64,7 +68,7 @@ class HardwareCaptureRecorder(
             configureAudioRecorder(recorder, outputFile, request.quality)
             recorder.prepare()
             recorder.start()
-            listener.onCaptureStarted(HardwareCaptureOutput(outputFile, MediaType.Audio))
+            listener.onCaptureStarted(output)
         } catch (exception: IOException) {
             failStart("Unable to prepare audio recorder.", exception)
         } catch (exception: RuntimeException) {
@@ -79,6 +83,8 @@ class HardwareCaptureRecorder(
         }
 
         val outputFile = outputFileFor(request)
+        val output = HardwareCaptureOutput(outputFile, request.mediaType)
+        activeOutput = output
         val recorder = newMediaRecorder()
         mediaRecorder = recorder
 
@@ -246,18 +252,22 @@ class HardwareCaptureRecorder(
         cameraDevice = null
     }
 
-    private fun stopMediaRecorder() {
-        val recorder = mediaRecorder ?: return
+    private fun stopMediaRecorder(): HardwareRecorderStopResult {
+        val recorder = mediaRecorder ?: return HardwareRecorderStopResult.NoActiveRecorder
+        val output = activeOutput
         try {
             recorder.stop()
+            return HardwareRecorderStopResult.Finalized(output)
         } catch (exception: RuntimeException) {
-            listener.onCaptureError(
-                "Recorder stopped before media was finalized. ${exception.message.orEmpty()}".trim(),
+            return HardwareRecorderStopResult.FinalizeFailed(
+                message = "Recorder stopped before media was finalized. ${exception.message.orEmpty()}".trim(),
+                output = output,
             )
         } finally {
             recorder.reset()
             recorder.release()
             mediaRecorder = null
+            activeOutput = null
         }
     }
 
@@ -306,3 +316,16 @@ data class HardwareCaptureOutput(
     val file: File,
     val mediaType: MediaType,
 )
+
+sealed interface HardwareRecorderStopResult {
+    data class Finalized(
+        val output: HardwareCaptureOutput?,
+    ) : HardwareRecorderStopResult
+
+    data object NoActiveRecorder : HardwareRecorderStopResult
+
+    data class FinalizeFailed(
+        val message: String,
+        val output: HardwareCaptureOutput?,
+    ) : HardwareRecorderStopResult
+}

@@ -13,7 +13,14 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import java.time.Instant
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.witness.app.R
+import org.witness.app.data.upload.CapturedEvidenceQueueRequest
+import org.witness.app.data.upload.CapturedEvidenceQueuer
 import org.witness.app.domain.model.CaptureMode
 import org.witness.app.domain.model.CaptureQuality
 import org.witness.app.domain.model.MediaType
@@ -34,14 +41,18 @@ private const val FULL_BATTERY_SCALE_PERCENT = 100
 @Suppress("TooManyFunctions")
 class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     private lateinit var recorder: HardwareCaptureRecorder
+    private lateinit var evidenceQueuer: CapturedEvidenceQueuer
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val batteryCapturePolicy = BatteryCapturePolicy()
     private val captureStartPolicy = CaptureStartPolicy()
+    private var activeRecording: RecordingState.Active? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         recorder = HardwareCaptureRecorder(applicationContext, this)
+        evidenceQueuer = CapturedEvidenceQueuer(applicationContext)
         ensureNotificationChannel()
     }
 
@@ -63,6 +74,7 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
 
     override fun onDestroy() {
         recorder.stop()
+        serviceScope.cancel()
         CaptureServiceState.update(RecordingState.Idle)
         super.onDestroy()
     }
@@ -81,15 +93,15 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     }
 
     private fun startRecorder(evidenceId: String, decision: CaptureStartDecision.Start) {
-        CaptureServiceState.update(
-            RecordingState.Active(
-                evidenceId = evidenceId,
-                startedAt = Instant.now(),
-                mode = decision.captureMode,
-                mediaType = decision.mediaType,
-                quality = CaptureQuality.DefaultVideo,
-            ),
+        val recording = RecordingState.Active(
+            evidenceId = evidenceId,
+            startedAt = Instant.now(),
+            mode = decision.captureMode,
+            mediaType = decision.mediaType,
+            quality = CaptureQuality.DefaultVideo,
         )
+        activeRecording = recording
+        CaptureServiceState.update(recording)
         recorder.start(
             HardwareCaptureRequest(
                 evidenceId = evidenceId,
@@ -100,6 +112,7 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     }
 
     private fun stopForCriticalBattery() {
+        activeRecording = null
         CaptureServiceState.update(
             RecordingState.Error(
                 message = getString(R.string.capture_error_battery_too_low),
@@ -112,23 +125,30 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
 
     private fun stopCapture() {
         val currentState = CaptureServiceState.state.value
-        if (currentState is RecordingState.Active) {
+        val recording = activeRecording ?: currentState as? RecordingState.Active
+        if (recording != null) {
             CaptureServiceState.update(
                 RecordingState.Stopping(
-                    evidenceId = currentState.evidenceId,
+                    evidenceId = recording.evidenceId,
                     requestedAt = Instant.now(),
                 ),
             )
         }
-        recorder.stop()
-        CaptureServiceState.update(RecordingState.Idle)
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        val stopResult = recorder.stop()
+        val output = stopResult.output() ?: recording?.captureOutput()
+        if (recording != null && output != null) {
+            queueCapturedOutput(recording, output)
+        } else if (stopResult is HardwareRecorderStopResult.FinalizeFailed) {
+            onCaptureError(stopResult.message)
+        } else {
+            finishStoppedService()
+        }
     }
 
     override fun onCaptureStarted(output: HardwareCaptureOutput) = Unit
 
     override fun onCaptureError(message: String) {
+        activeRecording = null
         CaptureServiceState.update(
             RecordingState.Error(
                 message = message,
@@ -137,6 +157,51 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
         )
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    private fun queueCapturedOutput(state: RecordingState.Active, output: HardwareCaptureOutput) {
+        serviceScope.launch {
+            runCatching {
+                evidenceQueuer.queue(
+                    CapturedEvidenceQueueRequest(
+                        evidenceId = state.evidenceId,
+                        outputFile = output.file,
+                        mediaType = state.mediaType,
+                        captureMode = state.mode,
+                        startedAt = state.startedAt,
+                    ),
+                )
+            }.onFailure { error ->
+                activeRecording = null
+                CaptureServiceState.update(
+                    RecordingState.Error(
+                        message = error.message ?: getString(R.string.capture_error_queue_failed),
+                        occurredAt = Instant.now(),
+                    ),
+                )
+            }
+            activeRecording = null
+            finishStoppedService()
+        }
+    }
+
+    private fun finishStoppedService() {
+        CaptureServiceState.update(RecordingState.Idle)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun HardwareRecorderStopResult.output(): HardwareCaptureOutput? {
+        return when (this) {
+            is HardwareRecorderStopResult.Finalized -> output
+            is HardwareRecorderStopResult.FinalizeFailed -> output
+            HardwareRecorderStopResult.NoActiveRecorder -> null
+        }
+    }
+
+    private fun RecordingState.Active.captureOutput(): HardwareCaptureOutput? {
+        val outputFile = CaptureOutputFiles.latestFor(applicationContext, evidenceId, mediaType) ?: return null
+        return HardwareCaptureOutput(outputFile, mediaType)
     }
 
     private fun startForegroundCompat(notification: Notification) {

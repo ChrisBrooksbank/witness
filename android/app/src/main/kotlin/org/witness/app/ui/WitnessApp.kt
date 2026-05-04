@@ -47,6 +47,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import org.witness.app.R
+import org.witness.app.data.local.evidence.EvidenceCacheDatabase
 import org.witness.app.domain.model.CaptureMode
 import org.witness.app.domain.model.MediaType
 import org.witness.app.domain.model.RecordingState
@@ -94,6 +95,7 @@ private sealed class RecordingUiState(
 fun WitnessApp() {
     val context = LocalContext.current
     var selectedDestination by remember { mutableStateOf(MainDestination.Home) }
+    val pendingEvidenceCount = rememberPendingEvidenceCount()
     val serviceRecordingState by CaptureServiceState.state.collectAsState()
     val recordingState = serviceRecordingState.toRecordingUiState()
     var hasAcceptedDisclaimer by remember { mutableStateOf(false) }
@@ -136,7 +138,7 @@ fun WitnessApp() {
                     },
                 )
 
-                MainDestination.Queue -> UploadQueueScreen()
+                MainDestination.Queue -> UploadQueueScreen(pendingCount = pendingEvidenceCount)
                 MainDestination.Settings -> SettingsScreen(
                     wifiOnlyUploads = wifiOnlyUploads,
                     onWifiOnlyUploadsChanged = { wifiOnlyUploads = it },
@@ -150,6 +152,16 @@ fun WitnessApp() {
             onAccepted = { hasAcceptedDisclaimer = true },
         )
     }
+}
+
+@Composable
+private fun rememberPendingEvidenceCount(): Int {
+    val context = LocalContext.current
+    val evidenceDao = remember(context) {
+        EvidenceCacheDatabase.create(context.applicationContext).evidenceDao()
+    }
+    val pendingEvidence by evidenceDao.observePendingEvidence().collectAsState(initial = emptyList())
+    return pendingEvidence.size
 }
 
 private fun RecordingState.toRecordingUiState(): RecordingUiState {
@@ -284,7 +296,13 @@ private fun WitnessModeHint() {
 
 @Composable
 @Suppress("FunctionName")
-private fun UploadQueueScreen() {
+private fun UploadQueueScreen(pendingCount: Int) {
+    val uploadStatus = if (pendingCount == 0) {
+        stringResource(R.string.upload_status)
+    } else {
+        stringResource(R.string.upload_status_pending, pendingCount)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -295,7 +313,7 @@ private fun UploadQueueScreen() {
         QueueGlyph()
         Spacer(modifier = Modifier.height(IconSpacing))
         Text(
-            text = stringResource(R.string.upload_status),
+            text = uploadStatus,
             color = MaterialTheme.colorScheme.onBackground,
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.headlineSmall,
@@ -423,6 +441,6 @@ private fun NavigationGlyph(selected: Boolean) {
 @Suppress("FunctionName", "UnusedPrivateMember")
 private fun WitnessAppPreview() {
     WitnessTheme {
-        WitnessApp()
+        UploadQueueScreen(pendingCount = 1)
     }
 }
