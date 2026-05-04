@@ -5,8 +5,8 @@
 
 ## Current Iteration
 
-**Focus:** Hardware capture integration
-**Target:** Implement and validate Camera2 video and audio-only recording on an Android device or emulator.
+**Focus:** Group backend setup
+**Target:** Make the MVP backend durable across restarts and package it for non-expert Docker/Caddy deployment.
 
 ## Task List
 
@@ -152,6 +152,18 @@
   - Estimate: L
   - Acceptance: Protocol design covers node auth, replication, and revocation conflict handling for multi-node rollout.
 
+- [x] **TASK-023**: Implement durable group backend setup - completed 2026-05-04
+  - Spec: `docs/design/group-backend-setup-plan.md`
+  - Depends: TASK-016
+  - Estimate: L
+  - Acceptance: Backend persists verification metadata and encrypted chunks across restart, Docker Compose starts a healthy backend, Caddy HTTPS path is documented, and Android release builds require a configured HTTPS backend URL.
+
+- [x] **TASK-024**: Add pre-alpha APK release path - completed 2026-05-04
+  - Spec: `README.md`, `docs/releases/apk-distribution.md`
+  - Depends: TASK-023
+  - Estimate: M
+  - Acceptance: GitHub Releases workflow builds a signed release APK from version tags, publishes SHA-256 checksums, documents signing secrets, and labels the first candidate as pre-alpha.
+
 ## Completed
 
 - [x] **TASK-001**: Scaffold Android and Go project foundations - completed 2026-05-03
@@ -237,6 +249,17 @@
 - [x] **TASK-013**: Implement audio-only AAC capture fallback - completed 2026-05-04
   - Added audio-only MediaRecorder capture and a tested domain policy that downgrades below 15% battery or stops below 5%.
   - Validated low-battery fallback on `Witness_API_34`; emulator battery level 14% produced a playable app-private `.m4a` with AAC audio.
+
+- [x] **TASK-023**: Implement durable group backend setup - completed 2026-05-04
+  - Replaced backend in-memory evidence storage with SQLite metadata and filesystem-backed encrypted chunk persistence under `WITNESS_DATA_DIR`.
+  - Added Dockerfile, root Compose file, `.env.example`, Caddy HTTPS profile, and README operator guide for group deployments.
+  - Added Android release backend URL configuration through `-PwitnessNodeBaseUrl` or `WITNESS_NODE_BASE_URL`, while keeping debug builds on the emulator default.
+  - Added persisted backend upload status and verification state, plus `/verify` chunk storage presence reporting without exposing server file paths.
+
+- [x] **TASK-024**: Add pre-alpha APK release path - completed 2026-05-04
+  - Added signed APK GitHub Releases workflow for `v*` tags and manual dispatch.
+  - Added release signing environment wiring in Gradle without committing secrets or requiring local unsigned release checks to sign.
+  - Added APK distribution docs, first pre-alpha release notes, and changelog entry for `v0.1.0-pre-alpha.1`.
 
 ## Blocked
 

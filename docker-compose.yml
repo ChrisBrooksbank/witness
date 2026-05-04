@@ -1,0 +1,41 @@
+services:
+  witness-backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      WITNESS_ADDR: "${WITNESS_ADDR:-:8080}"
+      WITNESS_DATA_DIR: /data
+    volumes:
+      - "${WITNESS_DATA_DIR:-./data}:/data"
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles:
+      - https
+    environment:
+      WITNESS_SERVER_NAME: "${WITNESS_SERVER_NAME}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      witness-backend:
+        condition: service_healthy
+
+volumes:
+  caddy_data:
+  caddy_config:

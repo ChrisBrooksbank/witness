@@ -26,13 +26,13 @@ import org.witness.app.data.remote.evidence.EvidenceMetadataPayload
 import org.witness.app.data.remote.evidence.EvidenceUploadApi
 import org.witness.app.data.remote.evidence.LocationPayload
 import org.witness.app.data.remote.evidence.RegisterHashRequest
+import org.witness.app.data.remote.evidence.WitnessNodeConfig
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 
 private const val EVIDENCE_ID_KEY = "evidence_id"
 private const val UPLOAD_WORK_PREFIX = "upload_"
 private const val INITIAL_BACKOFF_SECONDS = 30L
-private const val DEFAULT_NODE_BASE_URL = "http://10.0.2.2:8080/"
 private const val OCTET_STREAM = "application/octet-stream"
 private const val SHA256_PREFIX = "sha256:"
 
@@ -118,7 +118,7 @@ class EvidenceUploadWorker(
             .add(KotlinJsonAdapterFactory())
             .build()
         return Retrofit.Builder()
-            .baseUrl(DEFAULT_NODE_BASE_URL)
+            .baseUrl(WitnessNodeConfig.baseUrl)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
             .create(EvidenceUploadApi::class.java)

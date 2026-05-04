@@ -1,0 +1,105 @@
+name: Android APK Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example v0.1.0-pre-alpha.1"
+        required: true
+        type: string
+      backend_url:
+        description: "HTTPS backend URL baked into the APK"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release-apk:
+    name: Build Signed APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      WITNESS_NODE_BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.backend_url || secrets.WITNESS_RELEASE_BACKEND_URL }}
+      WITNESS_RELEASE_STORE_PASSWORD: ${{ secrets.WITNESS_RELEASE_STORE_PASSWORD }}
+      WITNESS_RELEASE_KEY_ALIAS: ${{ secrets.WITNESS_RELEASE_KEY_ALIAS }}
+      WITNESS_RELEASE_KEY_PASSWORD: ${{ secrets.WITNESS_RELEASE_KEY_PASSWORD }}
+      WITNESS_RELEASE_STORE_FILE: ${{ github.workspace }}/android/app/witness-release.jks
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: "gradle"
+
+      - name: Check release inputs
+        run: |
+          test -n "$WITNESS_NODE_BASE_URL"
+          case "$WITNESS_NODE_BASE_URL" in
+            https://*/ ) ;;
+            * )
+              echo "::error::WITNESS_NODE_BASE_URL must be an HTTPS URL with a trailing slash"
+              exit 1
+              ;;
+          esac
+          test -n "${{ secrets.WITNESS_RELEASE_KEYSTORE_BASE64 }}"
+          test -n "$WITNESS_RELEASE_STORE_PASSWORD"
+          test -n "$WITNESS_RELEASE_KEY_ALIAS"
+          test -n "$WITNESS_RELEASE_KEY_PASSWORD"
+
+      - name: Decode release keystore
+        run: |
+          printf '%s' "${{ secrets.WITNESS_RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > "$WITNESS_RELEASE_STORE_FILE"
+          chmod 600 "$WITNESS_RELEASE_STORE_FILE"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run release checks
+        run: |
+          ./gradlew ktlintCheck detekt testDebugUnitTest validateWitnessReleaseBackendUrl validateWitnessReleaseSigning
+
+      - name: Build signed release APK
+        run: ./gradlew assembleRelease
+
+      - name: Stage release artifacts
+        run: |
+          mkdir -p release
+          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+          test -n "$APK_PATH"
+          cp "$APK_PATH" "release/witness-${RELEASE_TAG}.apk"
+          sha256sum "release/witness-${RELEASE_TAG}.apk" > "release/witness-${RELEASE_TAG}.apk.sha256"
+          keytool -list -v \
+            -keystore "$WITNESS_RELEASE_STORE_FILE" \
+            -storepass "$WITNESS_RELEASE_STORE_PASSWORD" \
+            -alias "$WITNESS_RELEASE_KEY_ALIAS" \
+            | sed -n '/Certificate fingerprints:/,/Signature algorithm name:/p' \
+            > "release/witness-${RELEASE_TAG}-signing-certificate.txt"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: witness-${{ env.RELEASE_TAG }}-apk
+          path: android/release/*
+          retention-days: 30
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Witness ${{ env.RELEASE_TAG }}
+          prerelease: true
+          generate_release_notes: true
+          files: android/release/*
+          body_path: docs/releases/pre-alpha-apk.md

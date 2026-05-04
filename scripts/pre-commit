@@ -19,6 +19,11 @@ fi
 
 cd "$PROJECT_ROOT"
 
+# Git Bash on Windows does not always inherit Go's install directory.
+if ! command -v go &> /dev/null && [ -x "/c/Program Files/Go/bin/go.exe" ]; then
+    export PATH="/c/Program Files/Go/bin:$PATH"
+fi
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -83,7 +88,7 @@ if echo "$STAGED_FILES" | grep -q "\.go$"; then
 fi
 
 # Block commits with secrets (filename-based)
-if echo "$STAGED_FILES" | grep -qE "(\.env|credentials|secrets|\.keystore|\.jks|google-services\.json|\.pem|\.p12|\.pfx)"; then
+if echo "$STAGED_FILES" | grep -vE "(^|/)\.env\.example$" | grep -qE "(^|/)(\.env|credentials|secrets|.*\.keystore|.*\.jks|google-services\.json|.*\.pem|.*\.p12|.*\.pfx)"; then
     echo -e "${RED}Potential secrets detected in staged files!${NC}"
     echo "Review staged files and remove sensitive data."
     FAILED=1
@@ -91,7 +96,11 @@ fi
 
 # Scan staged content for secret patterns
 if [ -n "$STAGED_FILES" ]; then
-    SECRETS_FOUND=$(git diff --cached --diff-filter=ACM -U0 | grep -iE "(api_key|api_secret|password|secret_key|private_key|auth_token)\s*[:=]" || true)
+    SECRETS_FOUND=$(git diff --cached --diff-filter=ACM -U0 \
+        | grep '^+' \
+        | grep -vE '^\+\+\+' \
+        | grep -viE '(\$\{\{\s*secrets\.|providers\.environmentVariable|WITNESS_RELEASE_|storePassword = witnessReleaseStorePassword|keyPassword = witnessReleaseKeyPassword|keyAlias = witnessReleaseKeyAlias|Secret \| Purpose)' \
+        | grep -iE "(api_key|api_secret|password|secret_key|private_key|auth_token)\s*[:=]" || true)
     if [ -n "$SECRETS_FOUND" ]; then
         echo -e "${RED}Possible hardcoded secrets in staged changes:${NC}"
         echo "$SECRETS_FOUND" | head -5

@@ -36,6 +36,9 @@ jacoco/
 *.config.json
 !*.config.example.json
 
+# Local backend data
+/data/
+
 # IDE
 .vscode/
 *.swp

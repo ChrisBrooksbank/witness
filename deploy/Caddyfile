@@ -1,0 +1,3 @@
+{$WITNESS_SERVER_NAME} {
+	reverse_proxy witness-backend:8080
+}
