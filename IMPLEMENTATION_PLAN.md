@@ -5,8 +5,8 @@
 
 ## Current Iteration
 
-**Focus:** Group backend setup
-**Target:** Make the MVP backend durable across restarts and package it for non-expert Docker/Caddy deployment.
+**Focus:** Reference server hosting
+**Target:** Turn the durable MVP backend into a hosted HTTPS reference server for pre-alpha upload testing, with Netlify used where it fits.
 
 ## Task List
 
@@ -163,6 +163,13 @@
   - Depends: TASK-023
   - Estimate: M
   - Acceptance: GitHub Releases workflow builds a signed release APK from version tags, publishes SHA-256 checksums, documents signing secrets, and labels the first candidate as pre-alpha.
+
+- [ ] **TASK-025**: Host a reference Witness server
+  - Spec: `docs/design/reference-server-hosting-plan.md`
+  - Depends: TASK-023, TASK-024
+  - Estimate: M
+  - Acceptance: HTTPS reference server runs the current Go backend, persists encrypted chunks and metadata across restart, has backup/restore notes, has an Android reference APK configured against it, and uses Netlify for a companion status/tester page or explicitly defers that page.
+  - Progress: Added DigitalOcean-specific operator guide, cloud-init bootstrap, and a `doctl` provisioning script for the $4 Ubuntu Droplet path.
 
 ## Completed
 
