@@ -13,6 +13,78 @@ Protect people who document injustice. Safety first, evidence second.
 - **Decentralized** — Federated architecture with no single point of failure
 - **Accessible** — Simple enough for anyone to use
 
+## Demo
+
+A phone registers the evidence hash, uploads an encrypted chunk, and a group operator confirms receipt. A second registration with a different hash is refused, so the original proof of existence can't be overwritten. (Real responses from a local `witness-node`; long hashes shortened for display.)
+
+![Terminal demo of the Witness backend: health check, hash registration, encrypted chunk upload, a refused forged hash, and verification](docs/images/backend-demo.gif)
+
+## How It Fits Together
+
+```mermaid
+flowchart TB
+    subgraph Phone["Android app (Kotlin + Compose)"]
+        Calc["Calculator disguise<br/>CalculatorActivity"]
+        Main["Witness UI + volume-key witness mode<br/>MainActivity / WitnessApp"]
+        Capture["Capture service<br/>CaptureService + Camera2 / MediaRecorder"]
+        Queuer["Chunk, encrypt, hash<br/>CapturedEvidenceQueuer<br/>AES-GCM key in Android Keystore"]
+        Cache[("Encrypted chunk cache<br/>Room DB + .evidence/")]
+        Upload["Upload worker<br/>EvidenceUploadWorker (WorkManager)"]
+        Retention["Retention worker<br/>deletes local copies 24h after upload"]
+
+        Calc -- "1312=" --> Main
+        Main -- "record / witness mode" --> Capture
+        Capture -- "finished clip" --> Queuer
+        Queuer --> Cache
+        Queuer -- "enqueue" --> Upload
+        Cache --> Upload
+        Cache --> Retention
+    end
+
+    subgraph Node["Group backend node (Go, Docker)"]
+        direction LR
+        Caddy["Caddy<br/>automatic HTTPS"]
+        API["witness-node HTTP API<br/>/health, /hash, /chunks, /verify"]
+        DB[("SQLite<br/>witness.db")]
+        Chunks[("Encrypted chunk files<br/>data/chunks/")]
+        Caddy --> API
+        API --> DB
+        API --> Chunks
+    end
+
+    Upload -- "1. register Merkle-root hash<br/>2. upload encrypted chunks" --> Caddy
+    Operator(["Group operator"]) -- "GET /verify" --> Caddy
+```
+
+The upload path, step by step:
+
+```mermaid
+sequenceDiagram
+    participant App as Android app
+    participant Node as witness-node
+    App->>App: Record clip, split into 4 MiB chunks
+    App->>App: Encrypt each chunk (AES-GCM), SHA-256 it, build Merkle root
+    App->>Node: POST /api/v1/evidence/{id}/hash (Merkle root + metadata)
+    Node-->>App: 202 hashReceivedAt (first receipt time is kept)
+    loop each chunk
+        App->>Node: POST /api/v1/evidence/{id}/chunks/{n} + X-Chunk-Hash
+        Node->>Node: Check SHA-256, store bytes immutably
+        Node-->>App: 202 accepted
+    end
+    App->>App: Mark upload complete, schedule local deletion
+    Note over App,Node: Retries are idempotent. A different hash or chunk for an existing ID gets 409.
+```
+
+| Component | Where | What it does |
+|-----------|-------|--------------|
+| Calculator disguise | `android/.../ui/camouflage/` | Launcher shows a working calculator; `1312=` opens Witness |
+| Witness mode | `android/.../MainActivity.kt`, `domain/safety/` | Volume Up, Up, Down, Down arms covert recording; Volume Down cancels within 5 seconds |
+| Capture | `android/.../service/capture/` | Foreground service recording video or audio, switching to audio-only on low battery |
+| Encryption and hashing | `android/.../data/upload/CapturedEvidenceQueuer.kt`, `domain/verification/` | Chunks, encrypts, and hashes the clip, then deletes the plaintext recording |
+| Upload and retention | `android/.../data/upload/` | WorkManager jobs that upload with backoff and clean up after confirmation |
+| Backend node | `backend/` | Go HTTP API storing hashes, metadata, and encrypted chunks in SQLite and on disk |
+| Deployment | `docker-compose.yml`, `deploy/` | Docker Compose with Caddy for HTTPS, plus a DigitalOcean cloud-init reference |
+
 ## Key Features (MVP)
 
 - Video, audio, and photo capture with GPS metadata
@@ -128,9 +200,13 @@ curl https://witness.example.org/api/v1/evidence/{evidenceId}/verify
 
 The response includes upload and verification state plus `encryptedBytesStored` for each chunk so operators can confirm the encrypted bytes are still present on disk after a restart.
 
+Registered hashes and stored chunks are immutable. Retrying the same upload is safe and returns the original receipt time, but a different hash or chunk for an existing evidence ID is rejected with `409 Conflict`.
+
 Evidence ID discovery in the app UI/logs is still early MVP work. Until that is polished, use Android logs while testing.
 
 ### Backups
+
+The container fixes ownership of `./data` on start, so it can be created by Docker or by you.
 
 Back up `./data`. It contains `witness.db` and encrypted chunk files. Losing this directory may lose uploaded evidence. Test restoring the directory before relying on a deployment.
 
@@ -156,7 +232,7 @@ Designed to protect against:
 
 ## Status
 
-Early development — requirements gathering complete.
+Pre-alpha. The Android app records, encrypts, and uploads clips to a single group backend. Federation across multiple nodes, live streaming, and evidence playback aren't built yet.
 
 See [specs/readme.md](specs/readme.md) for the full specification index.
 
@@ -182,7 +258,7 @@ This project is in early stages. Contributions, feedback, and ideas welcome.
 
 ## License
 
-TBD — Will be open source (likely GPL or similar copyleft license).
+[MIT](LICENSE)
 
 ---
 
