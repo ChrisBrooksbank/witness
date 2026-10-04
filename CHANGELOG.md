@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Backend: registered evidence hashes and stored chunks can no longer be overwritten; conflicting re-registration returns `409`.
+- Backend: concurrent chunk uploads no longer fail with SQLite "database is locked".
+- Backend: the Docker container starts on a fresh `./data` directory instead of failing with permission denied.
+- Android: starting a capture while already recording no longer loses the clip in progress.
+- Android: a clip is queued for upload when the camera fails mid-recording.
+- Android: evidence IDs are random UUIDs so two devices can't collide on a shared node.
+- Android: the upload queue count updates live, and interrupted uploads are confirmed on the next run.
+- Android: the calculator no longer unlocks when `=` is pressed again on a computed `1312`.
+
+### Docs
+
+- README: demo GIF, component and upload-sequence diagrams.
+
 ## v0.1.0-pre-alpha.1
 
 First pre-alpha APK candidate for trusted testing.

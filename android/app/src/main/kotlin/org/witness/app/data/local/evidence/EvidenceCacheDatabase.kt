@@ -21,12 +21,19 @@ abstract class EvidenceCacheDatabase : RoomDatabase() {
     companion object {
         private const val DATABASE_NAME = "witness_evidence_cache.db"
 
+        @Volatile
+        private var instance: EvidenceCacheDatabase? = null
+
+        // Room only notifies observers about writes made through the same instance,
+        // so the upload queue UI and the workers must share one.
         fun create(context: Context): EvidenceCacheDatabase {
-            return Room.databaseBuilder(
-                context.applicationContext,
-                EvidenceCacheDatabase::class.java,
-                DATABASE_NAME,
-            ).build()
+            return instance ?: synchronized(this) {
+                instance ?: Room.databaseBuilder(
+                    context.applicationContext,
+                    EvidenceCacheDatabase::class.java,
+                    DATABASE_NAME,
+                ).build().also { instance = it }
+            }
         }
     }
 }

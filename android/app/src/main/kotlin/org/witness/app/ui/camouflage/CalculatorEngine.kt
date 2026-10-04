@@ -1,13 +1,26 @@
 package org.witness.app.ui.camouflage
 
+import kotlin.math.abs
+
 private const val SECRET_UNLOCK_EXPRESSION = "1312="
 private const val ERROR_VALUE = "Error"
 private const val ZERO_VALUE = "0"
+private const val MAX_EXACT_INTEGER_RESULT = 1e15
+private val OPERATORS = setOf('+', '-', '*', '/')
 
 class CalculatorEngine {
-    fun input(currentDisplay: String, token: String): CalculatorResult {
-        val expression = if (currentDisplay == ZERO_VALUE || currentDisplay == ERROR_VALUE) "" else currentDisplay
+    private var showingResult = false
 
+    fun input(currentDisplay: String, token: String): CalculatorResult {
+        val startsFresh = currentDisplay == ZERO_VALUE ||
+            currentDisplay == ERROR_VALUE ||
+            (showingResult && token.firstOrNull()?.isDigit() == true)
+        val expression = if (startsFresh) "" else currentDisplay
+
+        // "=" on a computed result must not re-evaluate it, otherwise 1300+12 "=" "=" would unlock.
+        if (token == "=" && showingResult) return CalculatorResult(display = currentDisplay, unlocked = false)
+
+        showingResult = token == "="
         return when {
             token == "C" -> CalculatorResult(display = ZERO_VALUE, unlocked = false)
             token == "=" -> evaluateInput("$expression=")
@@ -25,14 +38,14 @@ class CalculatorEngine {
     }
 
     private fun evaluate(expression: String): String? {
-        val operator = expression.firstOrNull { value -> value in listOf('+', '-', '*', '/') }
-        val parts = operator?.let { expression.split(it) }.orEmpty()
-        val left = parts.getOrNull(0)?.toDoubleOrNull()
-        val right = parts.getOrNull(1)?.toDoubleOrNull()
+        // Skip index 0 so a negative first operand (e.g. a previous "-2" result) is not read as the operator.
+        val operatorIndex = (1 until expression.length).firstOrNull { index -> expression[index] in OPERATORS }
+        val operator = operatorIndex?.let { expression[it] }
+        val left = operatorIndex?.let { expression.substring(0, it).toDoubleOrNull() }
+        val right = operatorIndex?.let { expression.substring(it + 1).toDoubleOrNull() }
 
         val result = when {
             operator == null -> expression
-            parts.size != 2 -> null
             left == null || right == null -> null
             operator == '+' -> (left + right).formatResult()
             operator == '-' -> (left - right).formatResult()
@@ -45,7 +58,7 @@ class CalculatorEngine {
     }
 
     private fun Double.formatResult(): String {
-        return if (this % 1.0 == 0.0) toLong().toString() else toString()
+        return if (this % 1.0 == 0.0 && abs(this) < MAX_EXACT_INTEGER_RESULT) toLong().toString() else toString()
     }
 }
 

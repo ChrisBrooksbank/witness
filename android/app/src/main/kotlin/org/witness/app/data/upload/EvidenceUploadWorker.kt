@@ -47,25 +47,26 @@ class EvidenceUploadWorker(
         val chunkDao = database.evidenceChunkDao()
         val evidence = evidenceDao.getEvidence(evidenceId) ?: return Result.failure()
         val pendingChunks = chunkDao.getPendingChunks(evidenceId)
+
+        if (pendingChunks.isEmpty()) {
+            // Every chunk was uploaded but the run ended before confirmation was recorded.
+            if (evidence.uploadStatus != UploadStatus.Complete.name) {
+                markUploadConfirmed(evidenceId)
+            }
+            return Result.success()
+        }
+
         val api = uploadApi()
-
-        if (pendingChunks.isEmpty()) return Result.success()
-
+        val uploadedChunkIndexes = mutableSetOf<Int>()
         return runCatching {
             evidenceDao.markEvidenceStatus(evidenceId, UploadStatus.Uploading.name)
             registerHash(api, evidence)
-            uploadChunks(api, evidence, pendingChunks)
-            val confirmedAt = System.currentTimeMillis()
-            evidenceDao.markEvidenceUploadConfirmed(
-                evidenceId = evidenceId,
-                status = UploadStatus.Complete.name,
-                confirmedAtEpochMillis = confirmedAt,
-                deleteAfterEpochMillis = EvidenceEntity.deletionDeadline(confirmedAt),
-            )
+            uploadChunks(api, evidence, pendingChunks, uploadedChunkIndexes)
+            markUploadConfirmed(evidenceId)
             Result.success()
         }.getOrElse {
             evidenceDao.markEvidenceStatus(evidenceId, UploadStatus.FailedRetryable.name)
-            pendingChunks.forEach { chunk ->
+            pendingChunks.filterNot { chunk -> chunk.chunkIndex in uploadedChunkIndexes }.forEach { chunk ->
                 chunkDao.markChunkStatus(
                     evidenceId = evidenceId,
                     chunkIndex = chunk.chunkIndex,
@@ -74,6 +75,16 @@ class EvidenceUploadWorker(
             }
             Result.retry()
         }
+    }
+
+    private suspend fun markUploadConfirmed(evidenceId: String) {
+        val confirmedAt = System.currentTimeMillis()
+        EvidenceCacheDatabase.create(applicationContext).evidenceDao().markEvidenceUploadConfirmed(
+            evidenceId = evidenceId,
+            status = UploadStatus.Complete.name,
+            confirmedAtEpochMillis = confirmedAt,
+            deleteAfterEpochMillis = EvidenceEntity.deletionDeadline(confirmedAt),
+        )
     }
 
     private suspend fun registerHash(api: EvidenceUploadApi, evidence: EvidenceEntity) {
@@ -93,6 +104,7 @@ class EvidenceUploadWorker(
         api: EvidenceUploadApi,
         evidence: EvidenceEntity,
         chunks: List<EvidenceChunkEntity>,
+        uploadedChunkIndexes: MutableSet<Int>,
     ) {
         val chunkDao = EvidenceCacheDatabase.create(applicationContext).evidenceChunkDao()
         chunks.forEach { chunk ->
@@ -110,6 +122,7 @@ class EvidenceUploadWorker(
                 chunkIndex = chunk.chunkIndex,
                 uploadedAtEpochMillis = System.currentTimeMillis(),
             )
+            uploadedChunkIndexes += chunk.chunkIndex
         }
     }
 

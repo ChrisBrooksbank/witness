@@ -13,8 +13,10 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import java.time.Instant
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -46,6 +48,7 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     private val batteryCapturePolicy = BatteryCapturePolicy()
     private val captureStartPolicy = CaptureStartPolicy()
     private var activeRecording: RecordingState.Active? = null
+    private var queueJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -68,7 +71,11 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
                 START_NOT_STICKY
             }
 
-            else -> START_NOT_STICKY
+            else -> {
+                // A sticky restart delivers a null intent; don't linger without a recording.
+                if (activeRecording == null) stopSelf()
+                START_NOT_STICKY
+            }
         }
     }
 
@@ -83,8 +90,11 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
         val evidenceId = intent.getStringExtra(EXTRA_EVIDENCE_ID) ?: newEvidenceId()
         val requestedCaptureMode = parseCaptureMode(intent.getStringExtra(EXTRA_CAPTURE_MODE))
         val requestedMediaType = parseMediaType(intent.getStringExtra(EXTRA_MEDIA_TYPE))
-        val decision = captureStartDecision(requestedCaptureMode, requestedMediaType)
         startForegroundCompat(createNotification())
+        // Starting again would replace the recorder and lose the clip being recorded.
+        if (activeRecording != null) return
+
+        val decision = captureStartDecision(requestedCaptureMode, requestedMediaType)
 
         when (decision) {
             is CaptureStartDecision.Start -> startRecorder(evidenceId, decision)
@@ -124,6 +134,9 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     }
 
     private fun stopCapture() {
+        // A repeated stop while the clip is being queued would queue the same file twice.
+        if (queueJob?.isActive == true) return
+
         val currentState = CaptureServiceState.state.value
         val recording = activeRecording ?: currentState as? RecordingState.Active
         if (recording != null) {
@@ -148,6 +161,20 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     override fun onCaptureStarted(output: HardwareCaptureOutput) = Unit
 
     override fun onCaptureError(message: String) {
+        // Camera callbacks arrive on the camera thread; handle state on the main thread.
+        serviceScope.launch { handleCaptureError(message) }
+    }
+
+    private fun handleCaptureError(message: String) {
+        val recording = activeRecording
+        val output = recorder.stop().output()
+        if (recording != null && output != null && output.file.length() > 0) {
+            // The camera failed mid-recording: keep and queue what was already captured.
+            CaptureServiceState.update(RecordingState.Error(message = message, occurredAt = Instant.now()))
+            queueCapturedOutput(recording, output)
+            return
+        }
+
         activeRecording = null
         CaptureServiceState.update(
             RecordingState.Error(
@@ -160,7 +187,7 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     }
 
     private fun queueCapturedOutput(state: RecordingState.Active, output: HardwareCaptureOutput) {
-        serviceScope.launch {
+        queueJob = serviceScope.launch {
             runCatching {
                 evidenceQueuer.queue(
                     CapturedEvidenceQueueRequest(
@@ -239,10 +266,6 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
         notificationManager.createNotificationChannel(channel)
     }
 
-    private fun newEvidenceId(): String {
-        return "evidence-${System.currentTimeMillis()}"
-    }
-
     private fun parseCaptureMode(value: String?): CaptureMode {
         return CaptureMode.entries.firstOrNull { it.name == value } ?: CaptureMode.Standard
     }
@@ -273,6 +296,12 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     }
 
     companion object {
+        // Evidence IDs are shared across every device uploading to a node, so they must be
+        // globally unique; timestamp-based IDs collide when two people record at once.
+        fun newEvidenceId(prefix: String = "evidence"): String {
+            return "$prefix-${UUID.randomUUID()}"
+        }
+
         fun startIntent(
             context: Context,
             evidenceId: String,
