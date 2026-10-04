@@ -16,9 +16,9 @@ RUN apt-get update \
     && mkdir -p /data \
     && chown witness:witness /data
 
-USER witness
 WORKDIR /app
 COPY --from=build /out/witness-node /app/witness-node
+COPY backend/docker-entrypoint.sh /app/docker-entrypoint.sh
 
 ENV WITNESS_ADDR=:8080
 ENV WITNESS_DATA_DIR=/data
@@ -27,4 +27,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["curl", "--fail", "http://127.0.0.1:8080/health"]
 
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["/app/witness-node"]
