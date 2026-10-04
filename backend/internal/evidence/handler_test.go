@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -306,6 +308,39 @@ func TestUploadChunkRejectsOversizedBody(t *testing.T) {
 
 	if recorder.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("expected status %d, got %d", http.StatusRequestEntityTooLarge, recorder.Code)
+	}
+}
+
+func TestConcurrentChunkUploadsSucceed(t *testing.T) {
+	mux := http.NewServeMux()
+	RegisterHandlers(mux, newTestStore(t))
+
+	const uploads = 32
+	failures := make(chan string, uploads)
+	var wg sync.WaitGroup
+	for i := 0; i < uploads; i++ {
+		wg.Add(1)
+		go func(chunkIndex int) {
+			defer wg.Done()
+			payload := []byte(fmt.Sprintf("encrypted chunk %d", chunkIndex))
+			request := httptest.NewRequest(
+				http.MethodPost,
+				fmt.Sprintf("/api/v1/evidence/evidence-%d/chunks/%d", chunkIndex%4, chunkIndex),
+				bytes.NewReader(payload),
+			)
+			request.Header.Set("X-Chunk-Hash", "sha256:"+testSHA256(payload))
+			recorder := httptest.NewRecorder()
+			mux.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusAccepted {
+				failures <- fmt.Sprintf("chunk %d: status %d: %s", chunkIndex, recorder.Code, recorder.Body.String())
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(failures)
+
+	for failure := range failures {
+		t.Error(failure)
 	}
 }
 
