@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -47,7 +48,7 @@ class MainActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         var handled = false
 
-        if (event.action == KeyEvent.ACTION_DOWN) {
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
             val button = volumeButtonForKeyCode(event.keyCode)
 
             if (button != null && armController.isArmed && button == VolumeButton.Down) {
@@ -76,7 +77,8 @@ class MainActivity : ComponentActivity() {
         vibrate(WITNESS_ARMED_VIBRATION_MILLIS)
         mainHandler.postDelayed(
             {
-                if (armController.activationDue(System.currentTimeMillis())) {
+                // KeyEvent times use the uptime clock, so activation must be checked against it too.
+                if (armController.activationDue(SystemClock.uptimeMillis())) {
                     startWitnessMode()
                 }
             },

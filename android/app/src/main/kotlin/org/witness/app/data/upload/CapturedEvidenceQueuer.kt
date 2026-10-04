@@ -112,12 +112,13 @@ class CapturedEvidenceQueuer(
 
     private fun java.io.InputStream.readNextChunk(): ByteArray {
         val buffer = ByteArray(MAX_PLAINTEXT_CHUNK_BYTES)
-        val bytesRead = read(buffer)
-        return when {
-            bytesRead <= 0 -> ByteArray(0)
-            bytesRead == buffer.size -> buffer
-            else -> buffer.copyOf(bytesRead)
+        var bytesRead = 0
+        while (bytesRead < buffer.size) {
+            val count = read(buffer, bytesRead, buffer.size - bytesRead)
+            if (count < 0) break
+            bytesRead += count
         }
+        return if (bytesRead == buffer.size) buffer else buffer.copyOf(bytesRead)
     }
 
     private data class EncryptedChunk(

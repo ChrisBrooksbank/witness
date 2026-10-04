@@ -125,6 +125,7 @@ fun WitnessApp() {
                     onRecordToggle = {
                         when (serviceRecordingState) {
                             is RecordingState.Active -> context.startService(CaptureService.stopIntent(context))
+                            is RecordingState.Stopping -> Unit
                             else -> {
                                 val intent = CaptureService.startIntent(
                                     context = context,

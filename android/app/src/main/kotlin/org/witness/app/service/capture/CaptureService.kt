@@ -68,7 +68,11 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
                 START_NOT_STICKY
             }
 
-            else -> START_NOT_STICKY
+            else -> {
+                // A sticky restart delivers a null intent; don't linger without a recording.
+                if (activeRecording == null) stopSelf()
+                START_NOT_STICKY
+            }
         }
     }
 
@@ -83,8 +87,11 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
         val evidenceId = intent.getStringExtra(EXTRA_EVIDENCE_ID) ?: newEvidenceId()
         val requestedCaptureMode = parseCaptureMode(intent.getStringExtra(EXTRA_CAPTURE_MODE))
         val requestedMediaType = parseMediaType(intent.getStringExtra(EXTRA_MEDIA_TYPE))
-        val decision = captureStartDecision(requestedCaptureMode, requestedMediaType)
         startForegroundCompat(createNotification())
+        // Starting again would replace the recorder and lose the clip being recorded.
+        if (activeRecording != null) return
+
+        val decision = captureStartDecision(requestedCaptureMode, requestedMediaType)
 
         when (decision) {
             is CaptureStartDecision.Start -> startRecorder(evidenceId, decision)
@@ -148,6 +155,20 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     override fun onCaptureStarted(output: HardwareCaptureOutput) = Unit
 
     override fun onCaptureError(message: String) {
+        // Camera callbacks arrive on the camera thread; handle state on the main thread.
+        serviceScope.launch { handleCaptureError(message) }
+    }
+
+    private fun handleCaptureError(message: String) {
+        val recording = activeRecording
+        val output = recorder.stop().output()
+        if (recording != null && output != null && output.file.length() > 0) {
+            // The camera failed mid-recording: keep and queue what was already captured.
+            CaptureServiceState.update(RecordingState.Error(message = message, occurredAt = Instant.now()))
+            queueCapturedOutput(recording, output)
+            return
+        }
+
         activeRecording = null
         CaptureServiceState.update(
             RecordingState.Error(
