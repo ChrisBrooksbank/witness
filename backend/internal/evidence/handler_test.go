@@ -200,6 +200,115 @@ func TestHashRegistrationAfterChunkPreservesReceivedUploadStatus(t *testing.T) {
 	}
 }
 
+func registerHashBody(hash string) string {
+	return `{"evidenceId":"evidence-1","hash":"` + hash + `","timestamp":"2026-05-03T12:00:00Z","metadata":{"appVersion":"0.1.0","captureMode":"Witness","mediaType":"Video","device":{"manufacturer":"Google","model":"Pixel","androidVersion":"14","fingerprint":"fingerprint"},"location":null,"timeSource":"Device"}}`
+}
+
+func TestHashRegistrationIsImmutable(t *testing.T) {
+	mux := http.NewServeMux()
+	RegisterHandlers(mux, newTestStore(t))
+
+	register := func(hash string) (*httptest.ResponseRecorder, RegisterHashResponse) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(
+			http.MethodPost,
+			"/api/v1/evidence/evidence-1/hash",
+			strings.NewReader(registerHashBody(hash)),
+		)
+		mux.ServeHTTP(recorder, request)
+		var response RegisterHashResponse
+		_ = json.Unmarshal(recorder.Body.Bytes(), &response)
+		return recorder, response
+	}
+
+	first, firstResponse := register("sha256:root")
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, first.Code)
+	}
+
+	retry, retryResponse := register("sha256:root")
+	if retry.Code != http.StatusAccepted {
+		t.Fatalf("expected retry status %d, got %d", http.StatusAccepted, retry.Code)
+	}
+	if retryResponse.HashReceivedAt != firstResponse.HashReceivedAt {
+		t.Fatalf("expected retry to keep original receipt time %q, got %q",
+			firstResponse.HashReceivedAt, retryResponse.HashReceivedAt)
+	}
+
+	conflict, _ := register("sha256:other")
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("expected status %d for different hash, got %d", http.StatusConflict, conflict.Code)
+	}
+
+	verifyRecorder := httptest.NewRecorder()
+	mux.ServeHTTP(verifyRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", nil))
+	var record Record
+	if err := json.NewDecoder(verifyRecorder.Body).Decode(&record); err != nil {
+		t.Fatalf("decode verify response: %v", err)
+	}
+	if record.Hash != "sha256:root" || record.HashReceivedAt != firstResponse.HashReceivedAt {
+		t.Fatalf("expected original hash registration to be kept, got %+v", record)
+	}
+}
+
+func TestChunkReuploadIsIdempotentAndImmutable(t *testing.T) {
+	mux := http.NewServeMux()
+	RegisterHandlers(mux, newTestStore(t))
+
+	upload := func(payload []byte) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(
+			http.MethodPost,
+			"/api/v1/evidence/evidence-1/chunks/0",
+			bytes.NewReader(payload),
+		)
+		request.Header.Set("X-Chunk-Hash", "sha256:"+testSHA256(payload))
+		mux.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	original := []byte("encrypted chunk")
+	if code := upload(original).Code; code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d", http.StatusAccepted, code)
+	}
+	if code := upload(original).Code; code != http.StatusAccepted {
+		t.Fatalf("expected retry status %d, got %d", http.StatusAccepted, code)
+	}
+	if code := upload([]byte("replacement chunk")).Code; code != http.StatusConflict {
+		t.Fatalf("expected status %d for replacement chunk, got %d", http.StatusConflict, code)
+	}
+
+	verifyRecorder := httptest.NewRecorder()
+	mux.ServeHTTP(verifyRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", nil))
+	var record Record
+	if err := json.NewDecoder(verifyRecorder.Body).Decode(&record); err != nil {
+		t.Fatalf("decode verify response: %v", err)
+	}
+	chunk := record.Chunks[0]
+	if chunk.ChunkHash != "sha256:"+testSHA256(original) || !chunk.EncryptedBytesStored {
+		t.Fatalf("expected original chunk to be kept, got %+v", chunk)
+	}
+}
+
+func TestUploadChunkRejectsOversizedBody(t *testing.T) {
+	mux := http.NewServeMux()
+	RegisterHandlers(mux, newTestStore(t))
+	payload := bytes.Repeat([]byte("x"), maxChunkBytes+1)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/evidence/evidence-1/chunks/0",
+		bytes.NewReader(payload),
+	)
+	request.Header.Set("X-Chunk-Hash", "sha256:"+testSHA256(payload))
+	mux.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected status %d, got %d", http.StatusRequestEntityTooLarge, recorder.Code)
+	}
+}
+
 func testSHA256(payload []byte) string {
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])

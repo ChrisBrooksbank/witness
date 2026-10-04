@@ -75,6 +75,9 @@ func NewStoreAt(dataDir string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
+	// SQLite allows a single writer; sharing one connection serializes
+	// concurrent chunk uploads instead of failing them with SQLITE_BUSY.
+	db.SetMaxOpenConns(1)
 
 	store := &Store{
 		db:       db,
@@ -162,7 +165,8 @@ func (s *Store) handleRegisterHash(w http.ResponseWriter, r *http.Request) {
 				WHEN evidence.upload_status = ? THEN evidence.upload_status
 				ELSE excluded.upload_status
 			END,
-			verification_state = excluded.verification_state`,
+			verification_state = excluded.verification_state
+		 WHERE evidence.hash = ''`,
 		evidenceID,
 		request.Hash,
 		receivedAt,
@@ -176,9 +180,27 @@ func (s *Store) handleRegisterHash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A registered hash is the proof-of-existence record, so it is never
+	// overwritten: retries get the original receipt time, and a different
+	// hash for the same evidence ID is rejected.
+	var storedHash string
+	var storedReceivedAt string
+	err = s.db.QueryRow(
+		`SELECT hash, hash_received_at FROM evidence WHERE evidence_id = ?`,
+		evidenceID,
+	).Scan(&storedHash, &storedReceivedAt)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load evidence hash")
+		return
+	}
+	if storedHash != request.Hash {
+		writeError(w, http.StatusConflict, "a different hash is already registered for this evidence")
+		return
+	}
+
 	writeJSON(w, http.StatusAccepted, RegisterHashResponse{
 		EvidenceID:     evidenceID,
-		HashReceivedAt: receivedAt,
+		HashReceivedAt: storedReceivedAt,
 		Accepted:       true,
 	})
 }
@@ -198,8 +220,13 @@ func (s *Store) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxChunkBytes))
-	if err != nil {
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
 		writeError(w, http.StatusRequestEntityTooLarge, "chunk exceeds maximum size")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read chunk body")
 		return
 	}
 
@@ -207,6 +234,30 @@ func (s *Store) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 	if actualHash != expectedHash {
 		writeError(w, http.StatusBadRequest, "chunk hash mismatch")
 		return
+	}
+
+	existing, err := s.loadChunk(evidenceID, chunkIndex)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to load chunk metadata")
+		return
+	}
+	if err == nil {
+		// Stored chunks are immutable: a retry of the same bytes is
+		// acknowledged, anything else would replace evidence.
+		if existing.ChunkHash != actualHash {
+			writeError(w, http.StatusConflict, "a different chunk is already stored at this index")
+			return
+		}
+		if fileExists(existing.filePath) {
+			writeJSON(w, http.StatusAccepted, UploadChunkResponse{
+				EvidenceID: evidenceID,
+				ChunkIndex: chunkIndex,
+				ChunkHash:  existing.ChunkHash,
+				ReceivedAt: existing.ReceivedAt,
+				Accepted:   true,
+			})
+			return
+		}
 	}
 
 	chunkPath, err := s.writeChunkFile(evidenceID, chunkIndex, body)
@@ -447,6 +498,30 @@ func (s *Store) loadRecord(evidenceID string) (Record, error) {
 		return Record{}, err
 	}
 	return record, nil
+}
+
+type storedChunk struct {
+	UploadedChunkRecord
+	filePath string
+}
+
+func (s *Store) loadChunk(evidenceID string, chunkIndex int) (storedChunk, error) {
+	var chunk storedChunk
+	err := s.db.QueryRow(
+		`SELECT chunk_index, chunk_hash, received_at, size_bytes, upload_status, file_path
+		 FROM chunks
+		 WHERE evidence_id = ? AND chunk_index = ?`,
+		evidenceID,
+		chunkIndex,
+	).Scan(
+		&chunk.ChunkIndex,
+		&chunk.ChunkHash,
+		&chunk.ReceivedAt,
+		&chunk.SizeBytes,
+		&chunk.UploadStatus,
+		&chunk.filePath,
+	)
+	return chunk, err
 }
 
 func (s *Store) writeChunkFile(evidenceID string, chunkIndex int, body []byte) (string, error) {
