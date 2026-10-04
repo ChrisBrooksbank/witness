@@ -13,8 +13,10 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import java.time.Instant
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -46,6 +48,7 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     private val batteryCapturePolicy = BatteryCapturePolicy()
     private val captureStartPolicy = CaptureStartPolicy()
     private var activeRecording: RecordingState.Active? = null
+    private var queueJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -131,6 +134,9 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     }
 
     private fun stopCapture() {
+        // A repeated stop while the clip is being queued would queue the same file twice.
+        if (queueJob?.isActive == true) return
+
         val currentState = CaptureServiceState.state.value
         val recording = activeRecording ?: currentState as? RecordingState.Active
         if (recording != null) {
@@ -181,7 +187,7 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     }
 
     private fun queueCapturedOutput(state: RecordingState.Active, output: HardwareCaptureOutput) {
-        serviceScope.launch {
+        queueJob = serviceScope.launch {
             runCatching {
                 evidenceQueuer.queue(
                     CapturedEvidenceQueueRequest(
@@ -260,10 +266,6 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
         notificationManager.createNotificationChannel(channel)
     }
 
-    private fun newEvidenceId(): String {
-        return "evidence-${System.currentTimeMillis()}"
-    }
-
     private fun parseCaptureMode(value: String?): CaptureMode {
         return CaptureMode.entries.firstOrNull { it.name == value } ?: CaptureMode.Standard
     }
@@ -294,6 +296,12 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     }
 
     companion object {
+        // Evidence IDs are shared across every device uploading to a node, so they must be
+        // globally unique; timestamp-based IDs collide when two people record at once.
+        fun newEvidenceId(prefix: String = "evidence"): String {
+            return "$prefix-${UUID.randomUUID()}"
+        }
+
         fun startIntent(
             context: Context,
             evidenceId: String,

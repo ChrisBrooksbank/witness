@@ -31,6 +31,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -98,7 +99,7 @@ fun WitnessApp() {
     val pendingEvidenceCount = rememberPendingEvidenceCount()
     val serviceRecordingState by CaptureServiceState.state.collectAsState()
     val recordingState = serviceRecordingState.toRecordingUiState()
-    var hasAcceptedDisclaimer by remember { mutableStateOf(false) }
+    var hasAcceptedDisclaimer by rememberSaveable { mutableStateOf(false) }
     var wifiOnlyUploads by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -129,7 +130,7 @@ fun WitnessApp() {
                             else -> {
                                 val intent = CaptureService.startIntent(
                                     context = context,
-                                    evidenceId = "evidence-${System.currentTimeMillis()}",
+                                    evidenceId = CaptureService.newEvidenceId(),
                                     captureMode = CaptureMode.Standard,
                                     mediaType = MediaType.Video,
                                 )

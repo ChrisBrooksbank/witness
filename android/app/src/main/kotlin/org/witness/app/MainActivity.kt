@@ -90,7 +90,7 @@ class MainActivity : ComponentActivity() {
         vibrate(WITNESS_STARTED_VIBRATION_MILLIS)
         val intent = CaptureService.startIntent(
             context = this,
-            evidenceId = "witness-${System.currentTimeMillis()}",
+            evidenceId = CaptureService.newEvidenceId(prefix = "witness"),
             captureMode = CaptureMode.Witness,
             mediaType = MediaType.Video,
         )
