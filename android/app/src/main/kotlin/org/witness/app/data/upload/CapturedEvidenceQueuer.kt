@@ -1,6 +1,7 @@
 package org.witness.app.data.upload
 
 import android.content.Context
+import androidx.room.withTransaction
 import java.io.File
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
@@ -26,7 +27,19 @@ class CapturedEvidenceQueuer(
     private val metadataCollector: AndroidCaptureMetadataCollector = AndroidCaptureMetadataCollector(context),
 ) {
     suspend fun queue(request: CapturedEvidenceQueueRequest) = withContext(Dispatchers.IO) {
-        val encryptedChunks = encryptChunks(request)
+        val encryptedChunks = mutableListOf<EncryptedChunk>()
+        runCatching {
+            encryptChunks(request, encryptedChunks)
+            store(request, encryptedChunks)
+        }.onFailure {
+            // The plaintext capture is kept for another attempt; drop the partial encrypted copies.
+            encryptedChunks.forEach { chunk -> File(chunk.entity.encryptedFilePath).delete() }
+        }.getOrThrow()
+        request.outputFile.delete()
+        EvidenceUploadWorker.enqueue(context, request.evidenceId)
+    }
+
+    private suspend fun store(request: CapturedEvidenceQueueRequest, encryptedChunks: List<EncryptedChunk>) {
         require(encryptedChunks.isNotEmpty()) { "captured media file was empty" }
         val chunkHashes = encryptedChunks.map { chunk -> chunk.hash }
         val merkleRoot = hasher.merkleRoot(chunkHashes.map { chunkHash -> chunkHash.sha256 })
@@ -41,17 +54,17 @@ class CapturedEvidenceQueuer(
             ),
         )
 
-        database.evidenceDao().insertEvidence(metadata.toEntity())
-        encryptedChunks.forEach { chunk ->
-            database.evidenceChunkDao().upsertChunk(chunk.entity)
+        // An evidence row without its chunks would sit in the upload queue forever, so write them together.
+        database.withTransaction {
+            database.evidenceDao().insertEvidence(metadata.toEntity())
+            encryptedChunks.forEach { chunk ->
+                database.evidenceChunkDao().upsertChunk(chunk.entity)
+            }
         }
-        request.outputFile.delete()
-        EvidenceUploadWorker.enqueue(context, request.evidenceId)
     }
 
-    private fun encryptChunks(request: CapturedEvidenceQueueRequest): List<EncryptedChunk> {
-        return request.outputFile.inputStream().buffered().use { input ->
-            val chunks = mutableListOf<EncryptedChunk>()
+    private fun encryptChunks(request: CapturedEvidenceQueueRequest, chunks: MutableList<EncryptedChunk>) {
+        request.outputFile.inputStream().buffered().use { input ->
             var chunkIndex = 0
             var plaintext = input.readNextChunk()
             while (plaintext.isNotEmpty()) {
@@ -59,7 +72,6 @@ class CapturedEvidenceQueuer(
                 chunkIndex += 1
                 plaintext = input.readNextChunk()
             }
-            chunks
         }
     }
 

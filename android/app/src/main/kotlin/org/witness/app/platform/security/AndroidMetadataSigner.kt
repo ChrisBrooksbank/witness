@@ -40,7 +40,9 @@ class AndroidMetadataSigner(
         signature.initVerify(certificate.publicKey)
         signature.update(canonicalizer.canonicalize(metadata))
 
-        return signature.verify(Base64.getDecoder().decode(signatureBase64))
+        // A malformed signature is a failed verification, not a crash.
+        val signatureBytes = runCatching { Base64.getDecoder().decode(signatureBase64) }.getOrNull() ?: return false
+        return runCatching { signature.verify(signatureBytes) }.getOrDefault(false)
     }
 
     private fun ensureSigningKey() {

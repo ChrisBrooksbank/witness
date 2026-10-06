@@ -10,7 +10,13 @@ interface EvidenceChunkDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertChunk(chunk: EvidenceChunkEntity)
 
-    @Query("SELECT * FROM evidence_chunks WHERE evidence_id = :evidenceId AND upload_status != :completeStatus")
+    @Query(
+        """
+        SELECT * FROM evidence_chunks
+        WHERE evidence_id = :evidenceId AND upload_status != :completeStatus
+        ORDER BY chunk_index ASC
+        """,
+    )
     suspend fun getPendingChunks(
         evidenceId: String,
         completeStatus: String = UploadStatus.Complete.name,
