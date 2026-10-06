@@ -35,6 +35,24 @@ func TestRegisterHashEndpoint(t *testing.T) {
 	}
 }
 
+func TestRegisterHashRejectsOversizedBody(t *testing.T) {
+	padding := strings.Repeat("a", maxRegisterHashBytes)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/evidence/evidence-1/hash",
+		strings.NewReader(`{"evidenceId":"evidence-1","hash":"sha256:root","timestamp":"`+padding+`"}`),
+	)
+
+	mux := http.NewServeMux()
+	RegisterHandlers(mux, newTestStore(t))
+	mux.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected status %d, got %d", http.StatusRequestEntityTooLarge, recorder.Code)
+	}
+}
+
 func TestUploadChunkRejectsHashMismatch(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(
@@ -80,7 +98,7 @@ func TestUploadChunkAndVerifyEndpoint(t *testing.T) {
 	}
 
 	verifyRecorder := httptest.NewRecorder()
-	verifyRequest := httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", nil)
+	verifyRequest := httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", http.NoBody)
 	mux.ServeHTTP(verifyRecorder, verifyRequest)
 
 	body := verifyRecorder.Body.String()
@@ -144,7 +162,7 @@ func TestVerifyEndpointSurvivesStoreRestart(t *testing.T) {
 	verifyMux := http.NewServeMux()
 	RegisterHandlers(verifyMux, reopened)
 	verifyRecorder := httptest.NewRecorder()
-	verifyRequest := httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", nil)
+	verifyRequest := httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", http.NoBody)
 	verifyMux.ServeHTTP(verifyRecorder, verifyRequest)
 
 	body := verifyRecorder.Body.String()
@@ -181,7 +199,7 @@ func TestHashRegistrationAfterChunkPreservesReceivedUploadStatus(t *testing.T) {
 	mux.ServeHTTP(httptest.NewRecorder(), registerRequest)
 
 	verifyRecorder := httptest.NewRecorder()
-	verifyRequest := httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", nil)
+	verifyRequest := httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", http.NoBody)
 	mux.ServeHTTP(verifyRecorder, verifyRequest)
 
 	if verifyRecorder.Code != http.StatusOK {
@@ -243,7 +261,7 @@ func TestHashRegistrationIsImmutable(t *testing.T) {
 	}
 
 	verifyRecorder := httptest.NewRecorder()
-	mux.ServeHTTP(verifyRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", nil))
+	mux.ServeHTTP(verifyRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", http.NoBody))
 	var record Record
 	if err := json.NewDecoder(verifyRecorder.Body).Decode(&record); err != nil {
 		t.Fatalf("decode verify response: %v", err)
@@ -281,7 +299,7 @@ func TestChunkReuploadIsIdempotentAndImmutable(t *testing.T) {
 	}
 
 	verifyRecorder := httptest.NewRecorder()
-	mux.ServeHTTP(verifyRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", nil))
+	mux.ServeHTTP(verifyRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", http.NoBody))
 	var record Record
 	if err := json.NewDecoder(verifyRecorder.Body).Decode(&record); err != nil {
 		t.Fatalf("decode verify response: %v", err)
@@ -341,6 +359,67 @@ func TestConcurrentChunkUploadsSucceed(t *testing.T) {
 
 	for failure := range failures {
 		t.Error(failure)
+	}
+}
+
+func TestConcurrentConflictingChunkUploadsKeepOneVersion(t *testing.T) {
+	store := newTestStore(t)
+	mux := http.NewServeMux()
+	RegisterHandlers(mux, store)
+
+	const uploads = 16
+	accepted := make(chan []byte, uploads)
+	var wg sync.WaitGroup
+	for i := 0; i < uploads; i++ {
+		wg.Add(1)
+		go func(attempt int) {
+			defer wg.Done()
+			payload := []byte(fmt.Sprintf("competing chunk %d", attempt))
+			request := httptest.NewRequest(
+				http.MethodPost,
+				"/api/v1/evidence/evidence-race/chunks/0",
+				bytes.NewReader(payload),
+			)
+			request.Header.Set("X-Chunk-Hash", "sha256:"+testSHA256(payload))
+			recorder := httptest.NewRecorder()
+			mux.ServeHTTP(recorder, request)
+			switch recorder.Code {
+			case http.StatusAccepted:
+				accepted <- payload
+			case http.StatusConflict:
+			default:
+				t.Errorf("attempt %d: unexpected status %d: %s", attempt, recorder.Code, recorder.Body.String())
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(accepted)
+
+	var winners [][]byte
+	for payload := range accepted {
+		winners = append(winners, payload)
+	}
+	if len(winners) != 1 {
+		t.Fatalf("expected exactly one accepted version of chunk 0, got %d", len(winners))
+	}
+
+	record, err := store.loadRecord("evidence-race")
+	if err != nil {
+		t.Fatalf("load record: %v", err)
+	}
+	if record.Chunks[0].ChunkHash != "sha256:"+testSHA256(winners[0]) {
+		t.Fatalf("stored hash does not match the accepted upload")
+	}
+	stored, err := store.loadChunk("evidence-race", 0)
+	if err != nil {
+		t.Fatalf("load chunk: %v", err)
+	}
+	onDisk, err := os.ReadFile(stored.filePath)
+	if err != nil {
+		t.Fatalf("read stored chunk: %v", err)
+	}
+	if !bytes.Equal(onDisk, winners[0]) {
+		t.Fatalf("stored bytes %q do not match the accepted upload %q", onDisk, winners[0])
 	}
 }
 

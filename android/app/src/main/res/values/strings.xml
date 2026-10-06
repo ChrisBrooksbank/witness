@@ -18,6 +18,7 @@
     <string name="capture_notification_title">Recording active</string>
     <string name="capture_notification_text">Witness is preserving evidence</string>
     <string name="capture_error_battery_too_low">Battery is too low to start recording safely.</string>
+    <string name="capture_error_microphone_permission">Microphone permission is required before recording.</string>
     <string name="capture_error_queue_failed">Recording finished but could not be queued for upload.</string>
     <string name="upload_status">Upload queue empty</string>
     <string name="upload_status_pending">Upload queue: %1$d pending</string>

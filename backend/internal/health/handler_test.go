@@ -11,7 +11,7 @@ import (
 
 func TestHealthEndpoint(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/health", nil)
+	request := httptest.NewRequest(http.MethodGet, "/health", http.NoBody)
 	store := newTestStore(t)
 
 	NewHandlerWithStore(store).ServeHTTP(recorder, request)
@@ -28,7 +28,7 @@ func TestHealthEndpoint(t *testing.T) {
 
 func TestVersionEndpoint(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/version", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/version", http.NoBody)
 	store := newTestStore(t)
 
 	NewHandlerWithStore(store).ServeHTTP(recorder, request)

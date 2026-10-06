@@ -19,6 +19,9 @@ import (
 
 const maxChunkBytes = 6 * 1024 * 1024
 
+// Hash registrations carry a hash and capture metadata, never media.
+const maxRegisterHashBytes = 64 * 1024
+
 const (
 	evidenceStatusHashReceived  = "hash_received"
 	evidenceStatusChunkReceived = "chunk_received"
@@ -129,7 +132,13 @@ func RegisterHandlers(mux *http.ServeMux, store *Store) {
 func (s *Store) handleRegisterHash(w http.ResponseWriter, r *http.Request) {
 	evidenceID := r.PathValue("evidenceId")
 	var request RegisterHashRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRegisterHashBytes)).Decode(&request)
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		writeError(w, http.StatusRequestEntityTooLarge, "hash registration exceeds maximum size")
+		return
+	}
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -236,7 +245,34 @@ func (s *Store) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, err := s.loadChunk(evidenceID, chunkIndex)
+	// Stage the bytes before taking the database connection so the slow disk
+	// write does not block other uploads. The store has a single connection,
+	// so the transaction below serializes the immutability check, the move
+	// into place and the metadata insert against concurrent uploads.
+	tempPath, finalPath, err := s.stageChunkFile(evidenceID, chunkIndex, body)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to store encrypted chunk")
+		return
+	}
+	defer func() { _ = os.Remove(tempPath) }()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start chunk metadata transaction")
+		return
+	}
+	committed := false
+	movedIntoPlace := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+			if movedIntoPlace {
+				_ = os.Remove(finalPath)
+			}
+		}
+	}()
+
+	existing, err := loadChunk(tx, evidenceID, chunkIndex)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusInternalServerError, "failed to load chunk metadata")
 		return
@@ -260,27 +296,7 @@ func (s *Store) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	chunkPath, err := s.writeChunkFile(evidenceID, chunkIndex, body)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to store encrypted chunk")
-		return
-	}
-
 	receivedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	tx, err := s.db.Begin()
-	if err != nil {
-		_ = os.Remove(chunkPath)
-		writeError(w, http.StatusInternalServerError, "failed to start chunk metadata transaction")
-		return
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-			_ = os.Remove(chunkPath)
-		}
-	}()
-
 	_, err = tx.Exec(
 		`INSERT INTO evidence (evidence_id, metadata_json, upload_status, verification_state)
 		 VALUES (?, '{}', ?, ?)
@@ -306,27 +322,36 @@ func (s *Store) handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Only a same-hash retry whose file went missing reaches the conflict
+	// branch, so the update restores the bytes without changing the hash.
 	_, err = tx.Exec(
 		`INSERT INTO chunks (evidence_id, chunk_index, chunk_hash, received_at, size_bytes, file_path, upload_status)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(evidence_id, chunk_index) DO UPDATE SET
-			chunk_hash = excluded.chunk_hash,
 			received_at = excluded.received_at,
 			size_bytes = excluded.size_bytes,
 			file_path = excluded.file_path,
-			upload_status = excluded.upload_status`,
+			upload_status = excluded.upload_status
+		 WHERE chunks.chunk_hash = excluded.chunk_hash`,
 		evidenceID,
 		chunkIndex,
 		actualHash,
 		receivedAt,
 		len(body),
-		chunkPath,
+		finalPath,
 		chunkStatusReceived,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to store chunk metadata")
 		return
 	}
+
+	if err := os.Rename(tempPath, finalPath); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to store encrypted chunk")
+		return
+	}
+	movedIntoPlace = true
+
 	if err := tx.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit chunk metadata")
 		return
@@ -397,7 +422,7 @@ func (s *Store) migrate() error {
 	return nil
 }
 
-func (s *Store) addColumnIfMissing(table string, column string, definition string) error {
+func (s *Store) addColumnIfMissing(table, column, definition string) error {
 	exists, err := s.columnExists(table, column)
 	if err != nil {
 		return err
@@ -411,12 +436,12 @@ func (s *Store) addColumnIfMissing(table string, column string, definition strin
 	return nil
 }
 
-func (s *Store) columnExists(table string, column string) (bool, error) {
+func (s *Store) columnExists(table, column string) (bool, error) {
 	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return false, fmt.Errorf("read %s schema: %w", table, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var cid int
@@ -476,7 +501,7 @@ func (s *Store) loadRecord(evidenceID string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var chunk UploadedChunkRecord
@@ -505,9 +530,17 @@ type storedChunk struct {
 	filePath string
 }
 
+type rowQuerier interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 func (s *Store) loadChunk(evidenceID string, chunkIndex int) (storedChunk, error) {
+	return loadChunk(s.db, evidenceID, chunkIndex)
+}
+
+func loadChunk(querier rowQuerier, evidenceID string, chunkIndex int) (storedChunk, error) {
 	var chunk storedChunk
-	err := s.db.QueryRow(
+	err := querier.QueryRow(
 		`SELECT chunk_index, chunk_hash, received_at, size_bytes, upload_status, file_path
 		 FROM chunks
 		 WHERE evidence_id = ? AND chunk_index = ?`,
@@ -524,38 +557,36 @@ func (s *Store) loadChunk(evidenceID string, chunkIndex int) (storedChunk, error
 	return chunk, err
 }
 
-func (s *Store) writeChunkFile(evidenceID string, chunkIndex int, body []byte) (string, error) {
+// stageChunkFile writes the chunk to a synced temporary file next to its
+// final location and returns both paths; the caller moves it into place.
+func (s *Store) stageChunkFile(evidenceID string, chunkIndex int, body []byte) (tempPath, finalPath string, err error) {
 	evidenceDir := filepath.Join(s.chunkDir, sha256Hex([]byte(evidenceID)))
 	if err := os.MkdirAll(evidenceDir, 0o700); err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	finalPath := filepath.Join(evidenceDir, fmt.Sprintf("%06d.bin", chunkIndex))
+	finalPath = filepath.Join(evidenceDir, fmt.Sprintf("%06d.bin", chunkIndex))
 	tempFile, err := os.CreateTemp(evidenceDir, fmt.Sprintf("%06d-*.tmp", chunkIndex))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	tempPath := tempFile.Name()
+	tempPath = tempFile.Name()
 
 	if _, err := tempFile.Write(body); err != nil {
 		_ = tempFile.Close()
 		_ = os.Remove(tempPath)
-		return "", err
+		return "", "", err
 	}
 	if err := tempFile.Sync(); err != nil {
 		_ = tempFile.Close()
 		_ = os.Remove(tempPath)
-		return "", err
+		return "", "", err
 	}
 	if err := tempFile.Close(); err != nil {
 		_ = os.Remove(tempPath)
-		return "", err
+		return "", "", err
 	}
-	if err := os.Rename(tempPath, finalPath); err != nil {
-		_ = os.Remove(tempPath)
-		return "", err
-	}
-	return finalPath, nil
+	return tempPath, finalPath, nil
 }
 
 func fileExists(path string) bool {

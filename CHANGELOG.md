@@ -12,10 +12,17 @@
 - Android: evidence IDs are random UUIDs so two devices can't collide on a shared node.
 - Android: the upload queue count updates live, and interrupted uploads are confirmed on the next run.
 - Android: the calculator no longer unlocks when `=` is pressed again on a computed `1312`.
+- Backend: concurrent uploads of different bytes to the same chunk index can no longer both be accepted; exactly one wins and the rest get `409`.
+- Backend: hash registration bodies are capped at 64 KiB instead of being read without limit.
+- Android: capture errors (low battery, missing permission, failed queueing) are shown on the home screen instead of being silently reset to "Ready".
+- Android: denying the camera permission no longer crashes the capture service on Android 14; recording without microphone permission shows an error instead of starting.
+- Android: a clip's evidence row and chunk rows are saved in one transaction, so a failed queue no longer leaves a stuck upload entry or orphaned encrypted files.
+- Android: pending chunks upload in index order, and a malformed metadata signature fails verification instead of crashing.
 
 ### Docs
 
 - README: demo GIF, component and upload-sequence diagrams.
+- README: rewritten with hero art, an animated app walkthrough, a pipeline graphic, a history of citizen witnessing, and an honest works-today/roadmap table.
 
 ## v0.1.0-pre-alpha.1
 

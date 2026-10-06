@@ -1,5 +1,6 @@
 package org.witness.app.service.capture
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,11 +8,13 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -82,7 +85,10 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     override fun onDestroy() {
         recorder.stop()
         serviceScope.cancel()
-        CaptureServiceState.update(RecordingState.Idle)
+        // An error must outlive the service so the UI can tell the user why recording stopped.
+        if (CaptureServiceState.state.value !is RecordingState.Error) {
+            CaptureServiceState.update(RecordingState.Idle)
+        }
         super.onDestroy()
     }
 
@@ -198,7 +204,11 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
                         startedAt = state.startedAt,
                     ),
                 )
+            }.onSuccess {
+                activeRecording = null
+                finishStoppedService()
             }.onFailure { error ->
+                // Keep the error visible: resetting to Idle would hide that the clip was not queued.
                 activeRecording = null
                 CaptureServiceState.update(
                     RecordingState.Error(
@@ -206,14 +216,17 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
                         occurredAt = Instant.now(),
                     ),
                 )
+                stopService()
             }
-            activeRecording = null
-            finishStoppedService()
         }
     }
 
     private fun finishStoppedService() {
         CaptureServiceState.update(RecordingState.Idle)
+        stopService()
+    }
+
+    private fun stopService() {
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -233,14 +246,23 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
 
     private fun startForegroundCompat(notification: Notification) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
-            )
+            startForeground(NOTIFICATION_ID, notification, foregroundServiceTypes())
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+    }
+
+    // Android 14 rejects a camera or microphone foreground service type whose permission is missing,
+    // so claim only the granted ones; the recorder then reports the missing permission instead of crashing.
+    private fun foregroundServiceTypes(): Int {
+        var types = 0
+        if (hasPermission(this, Manifest.permission.CAMERA)) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        }
+        if (hasPermission(this, Manifest.permission.RECORD_AUDIO)) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        }
+        return types
     }
 
     private fun createNotification(): Notification {
@@ -296,6 +318,27 @@ class CaptureService : Service(), HardwareCaptureRecorder.Listener {
     }
 
     companion object {
+        /**
+         * Every capture mode records audio, and the service cannot become a foreground service
+         * without a granted capture permission, so callers must check this before starting it.
+         */
+        fun hasRequiredPermissions(context: Context): Boolean {
+            return hasPermission(context, Manifest.permission.RECORD_AUDIO)
+        }
+
+        fun reportMissingPermissions(context: Context) {
+            CaptureServiceState.update(
+                RecordingState.Error(
+                    message = context.getString(R.string.capture_error_microphone_permission),
+                    occurredAt = Instant.now(),
+                ),
+            )
+        }
+
+        private fun hasPermission(context: Context, permission: String): Boolean {
+            return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+        }
+
         // Evidence IDs are shared across every device uploading to a node, so they must be
         // globally unique; timestamp-based IDs collide when two people record at once.
         fun newEvidenceId(prefix: String = "evidence"): String {
