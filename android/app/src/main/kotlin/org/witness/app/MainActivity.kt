@@ -87,6 +87,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startWitnessMode() {
+        if (!CaptureService.hasRequiredPermissions(this)) {
+            CaptureService.reportMissingPermissions(this)
+            requestCapturePermissions()
+            return
+        }
         vibrate(WITNESS_STARTED_VIBRATION_MILLIS)
         val intent = CaptureService.startIntent(
             context = this,

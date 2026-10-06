@@ -2,6 +2,7 @@
 
 package org.witness.app.ui
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -123,21 +124,8 @@ fun WitnessApp() {
             when (selectedDestination) {
                 MainDestination.Home -> RecordingHomeScreen(
                     recordingState = recordingState,
-                    onRecordToggle = {
-                        when (serviceRecordingState) {
-                            is RecordingState.Active -> context.startService(CaptureService.stopIntent(context))
-                            is RecordingState.Stopping -> Unit
-                            else -> {
-                                val intent = CaptureService.startIntent(
-                                    context = context,
-                                    evidenceId = CaptureService.newEvidenceId(),
-                                    captureMode = CaptureMode.Standard,
-                                    mediaType = MediaType.Video,
-                                )
-                                ContextCompat.startForegroundService(context, intent)
-                            }
-                        }
-                    },
+                    errorMessage = (serviceRecordingState as? RecordingState.Error)?.message,
+                    onRecordToggle = { toggleRecording(context, serviceRecordingState) },
                 )
 
                 MainDestination.Queue -> UploadQueueScreen(pendingCount = pendingEvidenceCount)
@@ -153,6 +141,24 @@ fun WitnessApp() {
         LegalDisclaimerDialog(
             onAccepted = { hasAcceptedDisclaimer = true },
         )
+    }
+}
+
+private fun toggleRecording(context: Context, serviceRecordingState: RecordingState) {
+    when (serviceRecordingState) {
+        is RecordingState.Active -> context.startService(CaptureService.stopIntent(context))
+        is RecordingState.Stopping -> Unit
+        else -> if (!CaptureService.hasRequiredPermissions(context)) {
+            CaptureService.reportMissingPermissions(context)
+        } else {
+            val intent = CaptureService.startIntent(
+                context = context,
+                evidenceId = CaptureService.newEvidenceId(),
+                captureMode = CaptureMode.Standard,
+                mediaType = MediaType.Video,
+            )
+            ContextCompat.startForegroundService(context, intent)
+        }
     }
 }
 
@@ -211,7 +217,7 @@ private fun RecordingStatusBar(recordingState: RecordingUiState) {
 
 @Composable
 @Suppress("FunctionName")
-private fun RecordingHomeScreen(recordingState: RecordingUiState, onRecordToggle: () -> Unit) {
+private fun RecordingHomeScreen(recordingState: RecordingUiState, errorMessage: String?, onRecordToggle: () -> Unit) {
     val isRecording = recordingState == RecordingUiState.Recording
     val actionLabel = if (isRecording) R.string.stop else R.string.record
     val actionDescription = if (isRecording) R.string.stop else R.string.record_evidence
@@ -231,6 +237,7 @@ private fun RecordingHomeScreen(recordingState: RecordingUiState, onRecordToggle
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
         )
+        if (errorMessage != null) CaptureErrorMessage(errorMessage)
         Spacer(modifier = Modifier.height(SectionSpacing))
         ElevatedButton(
             onClick = onRecordToggle,
@@ -268,6 +275,18 @@ private fun RecordingHomeScreen(recordingState: RecordingUiState, onRecordToggle
         Spacer(modifier = Modifier.height(SectionSpacing))
         WitnessModeHint()
     }
+}
+
+@Composable
+@Suppress("FunctionName")
+private fun CaptureErrorMessage(message: String) {
+    Spacer(modifier = Modifier.height(IconSpacing))
+    Text(
+        text = message,
+        color = MaterialTheme.colorScheme.error,
+        style = MaterialTheme.typography.bodyLarge,
+        textAlign = TextAlign.Center,
+    )
 }
 
 @Composable
