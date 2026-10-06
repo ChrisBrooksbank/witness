@@ -422,7 +422,7 @@ func (s *Store) migrate() error {
 	return nil
 }
 
-func (s *Store) addColumnIfMissing(table string, column string, definition string) error {
+func (s *Store) addColumnIfMissing(table, column, definition string) error {
 	exists, err := s.columnExists(table, column)
 	if err != nil {
 		return err
@@ -436,12 +436,12 @@ func (s *Store) addColumnIfMissing(table string, column string, definition strin
 	return nil
 }
 
-func (s *Store) columnExists(table string, column string) (bool, error) {
+func (s *Store) columnExists(table, column string) (bool, error) {
 	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return false, fmt.Errorf("read %s schema: %w", table, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var cid int
@@ -501,7 +501,7 @@ func (s *Store) loadRecord(evidenceID string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var chunk UploadedChunkRecord

@@ -98,7 +98,7 @@ func TestUploadChunkAndVerifyEndpoint(t *testing.T) {
 	}
 
 	verifyRecorder := httptest.NewRecorder()
-	verifyRequest := httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", nil)
+	verifyRequest := httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", http.NoBody)
 	mux.ServeHTTP(verifyRecorder, verifyRequest)
 
 	body := verifyRecorder.Body.String()
@@ -162,7 +162,7 @@ func TestVerifyEndpointSurvivesStoreRestart(t *testing.T) {
 	verifyMux := http.NewServeMux()
 	RegisterHandlers(verifyMux, reopened)
 	verifyRecorder := httptest.NewRecorder()
-	verifyRequest := httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", nil)
+	verifyRequest := httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", http.NoBody)
 	verifyMux.ServeHTTP(verifyRecorder, verifyRequest)
 
 	body := verifyRecorder.Body.String()
@@ -199,7 +199,7 @@ func TestHashRegistrationAfterChunkPreservesReceivedUploadStatus(t *testing.T) {
 	mux.ServeHTTP(httptest.NewRecorder(), registerRequest)
 
 	verifyRecorder := httptest.NewRecorder()
-	verifyRequest := httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", nil)
+	verifyRequest := httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", http.NoBody)
 	mux.ServeHTTP(verifyRecorder, verifyRequest)
 
 	if verifyRecorder.Code != http.StatusOK {
@@ -261,7 +261,7 @@ func TestHashRegistrationIsImmutable(t *testing.T) {
 	}
 
 	verifyRecorder := httptest.NewRecorder()
-	mux.ServeHTTP(verifyRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", nil))
+	mux.ServeHTTP(verifyRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", http.NoBody))
 	var record Record
 	if err := json.NewDecoder(verifyRecorder.Body).Decode(&record); err != nil {
 		t.Fatalf("decode verify response: %v", err)
@@ -299,7 +299,7 @@ func TestChunkReuploadIsIdempotentAndImmutable(t *testing.T) {
 	}
 
 	verifyRecorder := httptest.NewRecorder()
-	mux.ServeHTTP(verifyRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", nil))
+	mux.ServeHTTP(verifyRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/evidence/evidence-1/verify", http.NoBody))
 	var record Record
 	if err := json.NewDecoder(verifyRecorder.Body).Decode(&record); err != nil {
 		t.Fatalf("decode verify response: %v", err)
